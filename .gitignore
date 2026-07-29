@@ -1,6 +1,6 @@
 .vs/
 out/
+dist/
 *.user
 *.VC.db
 *.VC.opendb
-

@@ -26,8 +26,15 @@ projects/
 ├─ gui/TeslaGui.sln
 └─ linux/TeslaLinux.sln
 
+packaging/
+├─ AuthenticationSystemInstaller.iss
+├─ ChineseSimplified.isl
+└─ ChineseSimplified.LICENSE.txt
+
+package_release.bat             Windows Release 安装包一键打包入口
 third_party/nlohmann/          固定版本的 JSON 单头文件
 out/                           本地生成物，不提交 Git
+dist/                          最终安装包输出，不提交 Git
 ```
 
 每个源码模块中的 `.h` 和 `.cpp` 放在同一目录，不再使用 `common/<module>/include/tesla/<namespace>/src` 多层结构。
@@ -76,6 +83,53 @@ Qt 和 OpenSSL 的默认位置集中在 `projects/TeslaWindows.props`：
 其他电脑只需修改这一处，不需要逐个修改五个项目。
 
 Visual Studio 调试时由 Qt VS Tools 提供 Qt 环境。要把 EXE 复制到没有安装 Qt 的 Windows 电脑，使用对应 Qt 版本的 `windeployqt`，并同时复制 OpenSSL 的 `libcrypto-3-x64.dll`。
+
+## Windows 安装包打包
+
+项目使用根目录下的 `package_release.bat` 一键生成四个互相独立的 Windows x64 安装包。每个安装包只包含对应 GUI 及其 Qt、OpenSSL 和 Visual C++ 运行库，不会把其他三个 GUI、PDB 或静态库打入安装包。
+
+打包电脑除 Windows GUI 的开发环境外，还需要安装 Inno Setup 6：
+
+```bat
+winget install --id JRSoftware.InnoSetup --exact
+```
+
+双击 `package_release.bat` 会使用默认版本 `1.0.0`。也可以在命令行传入三段式版本号：
+
+```bat
+package_release.bat 1.2.0
+```
+
+批处理会依次完成：
+
+1. 定位 Visual Studio、Qt、OpenSSL 和 Inno Setup。
+2. 重新生成 `Release | x64` 的四个 GUI。
+3. 分别调用 `windeployqt` 收集每个程序自己的 Qt 插件和 DLL。
+4. 加入 OpenSSL 和 Visual C++ x64 应用本地运行库。
+5. 对四个独立部署目录执行限时启动检查。
+6. 使用独立 AppId 编译四个可单独安装、升级和卸载的安装包。
+
+安装包输出到：
+
+```text
+dist/installers/Authentication_System_Manager_Setup_<版本>_x64.exe
+dist/installers/Authentication_System_PC_Node_Setup_<版本>_x64.exe
+dist/installers/Authentication_System_UAV_Monitor_Setup_<版本>_x64.exe
+dist/installers/Authentication_System_Attack_Test_Setup_<版本>_x64.exe
+```
+
+安装程序默认安装到当前用户的 `%LOCALAPPDATA%\Programs\Authentication System`，不要求管理员权限。安装后会创建开始菜单入口，并可选择创建桌面快捷方式；每个程序在 Windows“应用和功能”中都有独立卸载项。目标电脑不需要安装 Qt、OpenSSL、Visual Studio、VC++ 运行库或 Inno Setup。
+
+如开发环境安装在非默认目录，可以在运行批处理前设置：
+
+```bat
+set TESLA_QT_ROOT=D:\Qt\6.10.2\msvc2022_64
+set TESLA_OPENSSL_ROOT=D:\OpenSSL-Win64
+set TESLA_ISCC=D:\Inno Setup 6\ISCC.exe
+package_release.bat 1.2.0
+```
+
+`dist/` 只保存本地生成的安装包，不提交 Git。当前打包流程未配置数字签名；正式放到网页公开下载前，建议为四个安装包配置代码签名证书，避免 Windows 显示“未知发布者”。
 
 ## Linux 远程生成
 

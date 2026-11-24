@@ -19,6 +19,12 @@
 
 namespace tesla::core
 {
+enum class AuthenticationMetricStorageMode
+{
+    RetainHistory,
+    LiveOnly
+};
+
 /**
  * @brief PC节点和Linux NodeAgent共用的认证配置、轮次控制与UDP处理入口。
  *
@@ -58,7 +64,9 @@ public:
         ObservationHandler fnObservationHandler = {},
         LocalKeyChainHandler fnLocalKeyChainHandler = {},
         MetricHandler fnMetricHandler = {},
-        std::string strLocalIpAddress = {}
+        std::string strLocalIpAddress = {},
+        AuthenticationMetricStorageMode modeMetricStorage =
+            AuthenticationMetricStorageMode::RetainHistory
     );
     ~AuthenticationNodeRuntime();
 

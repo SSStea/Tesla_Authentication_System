@@ -16,6 +16,7 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -29,6 +30,11 @@ namespace
 #endif
 
 using ArchiveContextKey = std::pair<std::string, std::uint64_t>;
+using MetricSummaryKey = std::tuple<
+    std::string,
+    std::string,
+    std::uint64_t
+>;
 
 struct ArchiveContext final
 {
@@ -360,7 +366,8 @@ public:
         ObservationHandler fnObservationHandler,
         LocalKeyChainHandler fnLocalKeyChainHandler,
         MetricHandler fnMetricHandler,
-        std::string strLocalIpAddress
+        std::string strLocalIpAddress,
+        AuthenticationMetricStorageMode modeMetricStorage
     )
         : m_strNodeName(std::move(strNodeName)),
           m_fnControlEventHandler(std::move(fnControlEventHandler)),
@@ -371,6 +378,7 @@ public:
           m_fnObservationHandler(std::move(fnObservationHandler)),
           m_fnLocalKeyChainHandler(std::move(fnLocalKeyChainHandler)),
           m_fnMetricHandler(std::move(fnMetricHandler)),
+          m_modeMetricStorage(modeMetricStorage),
           m_runSender(
               std::move(fnDatagramSender),
               [this](const AuthenticationRuntimeResult& resResult)
@@ -1331,35 +1339,66 @@ private:
             std::uint64_t u64ReceivedAuthBytes = 0;
             double dEstimatedEnergyMicroJoule = 0.0;
             bool bEnergySummaryFound = false;
-            const std::vector<metrics::AuthenticationMetricRecord> vecMetrics =
-                m_stoMetrics.vecSnapshot();
-            for (auto itrMetric = vecMetrics.rbegin();
-                itrMetric != vecMetrics.rend(); ++itrMetric)
-            {
-                const auto* pEnergy = std::get_if<
-                    metrics::EstimatedEnergyMetricSummary
-                >(&*itrMetric);
-                if (pEnergy == nullptr
-                    || pEnergy->strRoundId() != resResult.strRoundId()
-                    || pEnergy->strSenderId() != resResult.strSenderId()
-                    || pEnergy->u64ChainId() != resResult.u64ChainId())
-                {
-                    continue;
-                }
 
-                u64VerifyTimeNanoseconds = pEnergy->u64VerifyTimeNanoseconds();
-                u64ReceivedAuthBytes = pEnergy->u64ReceivedAuthBytes();
+            std::optional<metrics::EstimatedEnergyMetricSummary>
+                optEnergySummary;
+            if (m_modeMetricStorage
+                == AuthenticationMetricStorageMode::LiveOnly)
+            {
+                std::lock_guard<std::mutex> lckMetricSummaries(
+                    m_mtxMetricSummaries
+                );
+                const auto itrEnergy = m_mapPendingEnergySummaries.find(
+                    MetricSummaryKey(
+                        resResult.strRoundId(),
+                        resResult.strSenderId(),
+                        resResult.u64ChainId()
+                    )
+                );
+                if (itrEnergy != m_mapPendingEnergySummaries.end())
+                {
+                    optEnergySummary = itrEnergy->second;
+                }
+            }
+            else
+            {
+                const std::vector<metrics::AuthenticationMetricRecord>
+                    vecMetrics = m_stoMetrics.vecSnapshot();
+                for (auto itrMetric = vecMetrics.rbegin();
+                    itrMetric != vecMetrics.rend(); ++itrMetric)
+                {
+                    const auto* pEnergy = std::get_if<
+                        metrics::EstimatedEnergyMetricSummary
+                    >(&*itrMetric);
+                    if (pEnergy == nullptr
+                        || pEnergy->strRoundId() != resResult.strRoundId()
+                        || pEnergy->strSenderId() != resResult.strSenderId()
+                        || pEnergy->u64ChainId() != resResult.u64ChainId())
+                    {
+                        continue;
+                    }
+
+                    optEnergySummary = *pEnergy;
+                    break;
+                }
+            }
+
+            if (optEnergySummary.has_value())
+            {
+                const metrics::EstimatedEnergyMetricSummary& sumEnergy =
+                    optEnergySummary.value();
+                u64VerifyTimeNanoseconds = sumEnergy.u64VerifyTimeNanoseconds();
+                u64ReceivedAuthBytes = sumEnergy.u64ReceivedAuthBytes();
                 dEstimatedEnergyMicroJoule =
-                    pEnergy->dEstimatedEnergyMicroJoule();
+                    sumEnergy.dEstimatedEnergyMicroJoule();
                 if (const auto* pImproved = std::get_if<
                         metrics::ImprovedRoundMetricDetails
-                    >(&pEnergy->varDetails()))
+                    >(&sumEnergy.varDetails()))
                 {
                     u32FallbackGroupCount =
                         pImproved->u32FallbackGroupCount();
                 }
                 bEnergySummaryFound = true;
-                break;
             }
 
             if (!bEnergySummaryFound)
@@ -1523,6 +1562,21 @@ private:
                 // 归档失败不得阻断协议要求的最终轮次结果上报。
             }
 
+            if (m_modeMetricStorage
+                    == AuthenticationMetricStorageMode::LiveOnly
+                && roleResult
+                    == protocol::AuthenticationRoundResultRole::Receiver)
+            {
+                std::lock_guard<std::mutex> lckMetricSummaries(
+                    m_mtxMetricSummaries
+                );
+                m_mapPendingEnergySummaries.erase(MetricSummaryKey(
+                    resResult.strRoundId(),
+                    resResult.strSenderId(),
+                    resResult.u64ChainId()
+                ));
+            }
+
             m_fnControlEventHandler(protocol::NodeControlMessage(
                 protocol::AuthenticationRoundResultControlDetails(
                     resResult.strRoundId(),
@@ -1604,7 +1658,28 @@ private:
     {
         try
         {
-            m_stoMetrics.bAppend(varMetric);
+            if (m_modeMetricStorage
+                == AuthenticationMetricStorageMode::RetainHistory)
+            {
+                m_stoMetrics.bAppend(varMetric);
+            }
+            else if (const auto* pEnergy = std::get_if<
+                         metrics::EstimatedEnergyMetricSummary
+                     >(&varMetric))
+            {
+                std::lock_guard<std::mutex> lckMetricSummaries(
+                    m_mtxMetricSummaries
+                );
+                m_mapPendingEnergySummaries.insert_or_assign(
+                    MetricSummaryKey(
+                        pEnergy->strRoundId(),
+                        pEnergy->strSenderId(),
+                        pEnergy->u64ChainId()
+                    ),
+                    *pEnergy
+                );
+            }
+
             if (m_fnMetricHandler)
             {
                 m_fnMetricHandler(varMetric);
@@ -1648,6 +1723,11 @@ public:
 
     std::vector<metrics::AuthenticationMetricRecord> vecMetricSnapshot() const
     {
+        if (m_modeMetricStorage == AuthenticationMetricStorageMode::LiveOnly)
+        {
+            return {};
+        }
+
         return m_stoMetrics.vecSnapshot();
     }
 
@@ -1660,8 +1740,12 @@ private:
     ObservationHandler m_fnObservationHandler;
     LocalKeyChainHandler m_fnLocalKeyChainHandler;
     MetricHandler m_fnMetricHandler;
+    AuthenticationMetricStorageMode m_modeMetricStorage;
     AuthenticationObservationStore m_stoObservations;
     metrics::AuthenticationMetricStore m_stoMetrics;
+    mutable std::mutex m_mtxMetricSummaries;
+    std::map<MetricSummaryKey, metrics::EstimatedEnergyMetricSummary>
+        m_mapPendingEnergySummaries;
     mutable std::mutex m_mtxConfig;
     std::optional<SenderAuthenticationContext> m_optSenderContext;
     std::map<ArchiveContextKey, ArchiveContext> m_mapArchiveContexts;
@@ -1678,7 +1762,8 @@ AuthenticationNodeRuntime::AuthenticationNodeRuntime(
     ObservationHandler fnObservationHandler,
     LocalKeyChainHandler fnLocalKeyChainHandler,
     MetricHandler fnMetricHandler,
-    std::string strLocalIpAddress
+    std::string strLocalIpAddress,
+    AuthenticationMetricStorageMode modeMetricStorage
 )
     : m_ptrImpl(std::make_unique<Impl>(
           std::move(strNodeName),
@@ -1689,7 +1774,8 @@ AuthenticationNodeRuntime::AuthenticationNodeRuntime(
           std::move(fnObservationHandler),
           std::move(fnLocalKeyChainHandler),
           std::move(fnMetricHandler),
-          std::move(strLocalIpAddress)
+          std::move(strLocalIpAddress),
+          modeMetricStorage
       ))
 {
 }

@@ -251,7 +251,8 @@ NodeAgentService::NodeAgentService(
           {
               m_srvManagement.enqueueMonitorMetric(varMetric);
           },
-          m_cfgConfig.strBindAddress()
+          m_cfgConfig.strBindAddress(),
+          core::AuthenticationMetricStorageMode::LiveOnly
       ),
       m_srvDiscovery(
           m_cfgConfig.strBindAddress(),

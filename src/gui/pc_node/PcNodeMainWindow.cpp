@@ -220,13 +220,10 @@ void PcNodeMainWindow::refreshStatus()
 
 void PcNodeMainWindow::appendLog(const QString& strMessage)
 {
-    if (m_pLogEdit != nullptr)
-    {
-        m_pLogEdit->append(
-            QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz "))
-                + strMessage
-        );
-    }
+    m_pLogEdit->append(
+        QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz "))
+            + strMessage
+    );
 }
 
 void PcNodeMainWindow::applyStyle()

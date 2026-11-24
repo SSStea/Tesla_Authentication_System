@@ -469,11 +469,6 @@ protected:
     bool filterAcceptsRow(int nSourceRow, const QModelIndex&) const override
     {
         const auto* pModel = static_cast<const PacketTableModel*>(sourceModel());
-        if (pModel == nullptr)
-        {
-            return false;
-        }
-
         const PacketFailureControlDetails* pStandaloneFailure
             = pModel->pStandaloneFailure(nSourceRow);
         if (pStandaloneFailure != nullptr)

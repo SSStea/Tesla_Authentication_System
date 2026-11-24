@@ -378,7 +378,7 @@ QWidget* ManagerMainWindow::pCreateNodePage()
         this,
         [this](QTableWidgetItem* pItem)
         {
-            if (pItem == nullptr || pItem->column() != 0)
+            if (pItem->column() != 0)
             {
                 return;
             }
@@ -835,11 +835,6 @@ void ManagerMainWindow::refreshNodeTables()
 
 void ManagerMainWindow::validateAuthenticationInputs()
 {
-    if (m_pModeCombo == nullptr)
-    {
-        return;
-    }
-
     const bool bImproved = m_pModeCombo->currentIndex() == 1;
     const bool bFileMode = m_pPayloadCombo->currentIndex() == 1;
     const int nIntervalMilliseconds = m_pIntervalSpin->value();
@@ -859,7 +854,10 @@ void ManagerMainWindow::validateAuthenticationInputs()
     const int nMinimumIntervalMilliseconds = nPacketsPerInterval * 2;
     const bool bIntervalValid =
         nIntervalMilliseconds >= nMinimumIntervalMilliseconds;
-    bool bThresholdValid = true;
+    bool bThresholdValid = nDetectionThreshold >= 1
+        && nDetectionThreshold < nGroupSize;
+    std::optional<tesla::core::ImprovedTeslaParameters>
+        optImprovedParameters;
     if (!bIntervalValid)
     {
         listErrors.append(
@@ -867,30 +865,30 @@ void ManagerMainWindow::validateAuthenticationInputs()
                 .arg(nMinimumIntervalMilliseconds)
         );
     }
-    if (bImproved
-        && (nDetectionThreshold < 1
-            || nDetectionThreshold >= nGroupSize))
+    if (bImproved && !bThresholdValid)
     {
         bThresholdValid = false;
         listErrors.append(
             QStringLiteral("检测阈值必须满足 1 <= 阈值 < 分组大小")
         );
     }
-    if (bImproved && bThresholdValid)
+    if (bThresholdValid)
     {
         try
         {
-            // 复用核心参数构造，提前拦截矩阵规模或Tau数量安全上限。
-            static_cast<void>(tesla::core::ImprovedTeslaParameters(
+            optImprovedParameters.emplace(
                 static_cast<std::uint32_t>(nGroupSize),
                 static_cast<std::uint32_t>(nDetectionThreshold)
-            ));
+            );
         }
         catch (const std::exception& exError)
         {
             bThresholdValid = false;
-            listErrors.append(QStringLiteral("改进参数不可构造：%1")
-                .arg(QString::fromUtf8(exError.what())));
+            if (bImproved)
+            {
+                listErrors.append(QStringLiteral("改进参数不可构造：%1")
+                    .arg(QString::fromUtf8(exError.what())));
+            }
         }
     }
 
@@ -940,7 +938,7 @@ void ManagerMainWindow::validateAuthenticationInputs()
         !bIntervalValid
     );
     fnSetInvalid(m_pGroupSpin, false);
-    fnSetInvalid(m_pThresholdSpin, !bThresholdValid);
+    fnSetInvalid(m_pThresholdSpin, bImproved && !bThresholdValid);
     fnSetInvalid(m_pTextEdit, !bTextValid);
     fnSetInvalid(m_pSelectFileButton, !bFileValid);
 
@@ -999,12 +997,8 @@ void ManagerMainWindow::validateAuthenticationInputs()
         QString       strImprovedFormula = QStringLiteral(
             "S-TESLA：C = 32B × [N + I + G × (τ + 1)]"
         );
-        try
+        if (optImprovedParameters.has_value())
         {
-            const tesla::core::ImprovedTeslaParameters prmImproved(
-                static_cast<std::uint32_t>(nGroupSize),
-                static_cast<std::uint32_t>(nDetectionThreshold)
-            );
             const std::uint64_t u64GroupCount =
                 (u64PacketCount + static_cast<std::uint64_t>(nGroupSize) - 1U)
                 / static_cast<std::uint64_t>(nGroupSize);
@@ -1017,7 +1011,7 @@ void ManagerMainWindow::validateAuthenticationInputs()
                     0,
                     u64PacketCount,
                     u64DataIntervalCount,
-                    u64GroupCount * prmImproved.nTauCount(),
+                    u64GroupCount * optImprovedParameters->nTauCount(),
                     u64GroupCount
                 );
             strImprovedFormula = QStringLiteral(
@@ -1027,7 +1021,9 @@ void ManagerMainWindow::validateAuthenticationInputs()
                 .arg(u64PacketCount)
                 .arg(u64DataIntervalCount)
                 .arg(u64GroupCount)
-                .arg(static_cast<qulonglong>(prmImproved.nTauCount()))
+                .arg(static_cast<qulonglong>(
+                    optImprovedParameters->nTauCount()
+                ))
                 .arg(strByteSize(sumImprovedCommunication.u64TotalBytes()));
 
             if (bImproved)
@@ -1036,7 +1032,7 @@ void ManagerMainWindow::validateAuthenticationInputs()
                     sumImprovedCommunication.u64TotalBytes();
             }
         }
-        catch (const std::exception&)
+        else
         {
             strImprovedFormula += QStringLiteral(
                 "（当前分组大小与检测阈值无效，无法代入计算）"
@@ -1065,11 +1061,6 @@ void ManagerMainWindow::validateAuthenticationInputs()
 
 void ManagerMainWindow::refreshAuthenticationActions()
 {
-    if (m_pPrepareButton == nullptr || m_pStartButton == nullptr)
-    {
-        return;
-    }
-
     const bool bRunning = m_ctlAuthentication.bRoundRunning();
     const bool bPaused = m_ctlAuthentication.bRoundPaused();
     m_pPrepareButton->setEnabled(
@@ -1189,90 +1180,79 @@ void ManagerMainWindow::refreshSelectedFileInformation()
 
 void ManagerMainWindow::prepareRound()
 {
-    try
+    std::optional<tesla::protocol::ImprovedTeslaControlParameters>
+        optImprovedParameters;
+    const bool bImproved = m_pModeCombo->currentIndex() == 1;
+    if (bImproved)
     {
-        std::optional<tesla::protocol::ImprovedTeslaControlParameters>
-            optImprovedParameters;
-        const bool bImproved = m_pModeCombo->currentIndex() == 1;
-        if (bImproved)
-        {
-            optImprovedParameters.emplace(
-                static_cast<std::uint32_t>(m_pGroupSpin->value()),
-                static_cast<std::uint32_t>(m_pThresholdSpin->value())
-            );
-        }
+        optImprovedParameters.emplace(
+            static_cast<std::uint32_t>(m_pGroupSpin->value()),
+            static_cast<std::uint32_t>(m_pThresholdSpin->value())
+        );
+    }
 
-        tesla::protocol::AuthenticationCryptoAlgorithm algCrypto =
-            tesla::protocol::AuthenticationCryptoAlgorithm::Sha256;
-        if (m_pAlgorithmCombo->currentIndex() == 1)
-        {
-            algCrypto =
-                tesla::protocol::AuthenticationCryptoAlgorithm::Sm3;
-        }
-        else if (m_pAlgorithmCombo->currentIndex() == 2)
-        {
-            algCrypto =
-                tesla::protocol::AuthenticationCryptoAlgorithm::Sha3_256;
-        }
+    tesla::protocol::AuthenticationCryptoAlgorithm algCrypto =
+        tesla::protocol::AuthenticationCryptoAlgorithm::Sha256;
+    if (m_pAlgorithmCombo->currentIndex() == 1)
+    {
+        algCrypto = tesla::protocol::AuthenticationCryptoAlgorithm::Sm3;
+    }
+    else if (m_pAlgorithmCombo->currentIndex() == 2)
+    {
+        algCrypto = tesla::protocol::AuthenticationCryptoAlgorithm::Sha3_256;
+    }
 
-        QString strError;
-        if (m_pPayloadCombo->currentIndex() == 0)
-        {
-            const ManagerTextRoundConfiguration cfgRound(
-                bImproved
-                    ? tesla::protocol::UdpAuthenticationMode::Improved
-                    : tesla::protocol::UdpAuthenticationMode::Native,
-                algCrypto,
-                static_cast<std::uint32_t>(m_pRepeatSpin->value()),
-                static_cast<std::uint32_t>(m_pPacketsSpin->value()),
-                static_cast<std::uint32_t>(m_pDisclosureSpin->value()),
-                static_cast<std::uint32_t>(m_pIntervalSpin->value()),
-                std::move(optImprovedParameters),
-                m_pTextEdit->toPlainText()
-            );
-            m_bPreparedConfigurationCurrent =
-                m_ctlAuthentication.bPrepareTextRound(
-                    cfgRound,
-                    m_setSelectedSenderEndpoints,
-                    m_ctlNetwork.vecNodeSnapshots(),
-                    strError
-                );
-        }
-        else
-        {
-            const ManagerFileRoundConfiguration cfgRound(
-                bImproved
-                    ? tesla::protocol::UdpAuthenticationMode::Improved
-                    : tesla::protocol::UdpAuthenticationMode::Native,
-                algCrypto,
-                static_cast<std::uint32_t>(m_pPacketsSpin->value()),
-                static_cast<std::uint32_t>(m_pDisclosureSpin->value()),
-                static_cast<std::uint32_t>(m_pIntervalSpin->value()),
-                std::move(optImprovedParameters),
-                m_ptrSelectedFileBytes,
-                m_arrSelectedFileSha256
-            );
-            m_pFileComparisonTable->setRowCount(0);
-            m_bPreparedConfigurationCurrent =
-                m_ctlAuthentication.bPrepareFileRound(
+    QString strError;
+    if (m_pPayloadCombo->currentIndex() == 0)
+    {
+        const ManagerTextRoundConfiguration cfgRound(
+            bImproved
+                ? tesla::protocol::UdpAuthenticationMode::Improved
+                : tesla::protocol::UdpAuthenticationMode::Native,
+            algCrypto,
+            static_cast<std::uint32_t>(m_pRepeatSpin->value()),
+            static_cast<std::uint32_t>(m_pPacketsSpin->value()),
+            static_cast<std::uint32_t>(m_pDisclosureSpin->value()),
+            static_cast<std::uint32_t>(m_pIntervalSpin->value()),
+            std::move(optImprovedParameters),
+            m_pTextEdit->toPlainText()
+        );
+        m_bPreparedConfigurationCurrent =
+            m_ctlAuthentication.bPrepareTextRound(
                 cfgRound,
                 m_setSelectedSenderEndpoints,
                 m_ctlNetwork.vecNodeSnapshots(),
                 strError
             );
-        }
-        if (!m_bPreparedConfigurationCurrent)
-        {
-            m_pStatusLabel->setText(strError);
-        }
-        refreshAuthenticationActions();
     }
-    catch (const std::exception& exError)
+    else
     {
-        m_bPreparedConfigurationCurrent = false;
-        m_pStatusLabel->setText(QString::fromUtf8(exError.what()));
-        refreshAuthenticationActions();
+        const ManagerFileRoundConfiguration cfgRound(
+            bImproved
+                ? tesla::protocol::UdpAuthenticationMode::Improved
+                : tesla::protocol::UdpAuthenticationMode::Native,
+            algCrypto,
+            static_cast<std::uint32_t>(m_pPacketsSpin->value()),
+            static_cast<std::uint32_t>(m_pDisclosureSpin->value()),
+            static_cast<std::uint32_t>(m_pIntervalSpin->value()),
+            std::move(optImprovedParameters),
+            m_ptrSelectedFileBytes,
+            m_arrSelectedFileSha256
+        );
+        m_pFileComparisonTable->setRowCount(0);
+        m_bPreparedConfigurationCurrent =
+            m_ctlAuthentication.bPrepareFileRound(
+                cfgRound,
+                m_setSelectedSenderEndpoints,
+                m_ctlNetwork.vecNodeSnapshots(),
+                strError
+            );
     }
+    if (!m_bPreparedConfigurationCurrent)
+    {
+        m_pStatusLabel->setText(strError);
+    }
+    refreshAuthenticationActions();
 }
 
 void ManagerMainWindow::startRound()
@@ -1334,92 +1314,77 @@ void ManagerMainWindow::stopRound()
 
 void ManagerMainWindow::prepareFaultPlan()
 {
-    try
+    QString strError;
+    const int nSenderContextIndex =
+        m_pFaultSenderCombo->currentData().toInt();
+    const QVector<ManagerSenderRoundSnapshot> vecSnapshots =
+        m_ctlAuthentication.vecSenderRoundSnapshots();
+    if (nSenderContextIndex < 0
+        || nSenderContextIndex >= vecSnapshots.size())
     {
-        QString strError;
-        const int nSenderContextIndex =
-            m_pFaultSenderCombo->currentData().toInt();
-        const QVector<ManagerSenderRoundSnapshot> vecSnapshots =
-            m_ctlAuthentication.vecSenderRoundSnapshots();
-        if (nSenderContextIndex < 0
-            || nSenderContextIndex >= vecSnapshots.size())
-        {
-            m_pStatusLabel->setText(QStringLiteral("故障注入目标Sender无效"));
-            return;
-        }
+        m_pStatusLabel->setText(QStringLiteral("故障注入目标Sender无效"));
+        return;
+    }
 
-        const ManagerSenderRoundSnapshot& snpSender =
-            vecSnapshots.at(nSenderContextIndex);
-        const std::uint32_t u32ProtectedGroupSize = static_cast<std::uint32_t>(
-            m_pFaultProtectedGroupSpin->value()
+    const ManagerSenderRoundSnapshot& snpSender =
+        vecSnapshots.at(nSenderContextIndex);
+    const std::uint32_t u32ProtectedGroupSize = static_cast<std::uint32_t>(
+        m_pFaultProtectedGroupSpin->value()
+    );
+    if (m_pFaultTypeCombo->currentIndex() != 2
+        && snpSender.modeAuthentication()
+            == tesla::protocol::UdpAuthenticationMode::Native
+        && snpSender.u32PacketsPerInterval() % u32ProtectedGroupSize != 0)
+    {
+        m_pStatusLabel->setText(QStringLiteral(
+            "标签保护分组必须整除每间隔发包数"
+        ));
+        return;
+    }
+
+    tesla::protocol::AuthenticationFaultDetails varFault =
+        tesla::protocol::FixedDelayFaultDetails(1);
+    if (m_pFaultTypeCombo->currentIndex() == 0)
+    {
+        std::uint64_t u64RandomSeed = QRandomGenerator::global()->generate64();
+        if (u64RandomSeed == 0)
+        {
+            u64RandomSeed = 1;
+        }
+        varFault = tesla::protocol::PacketLossFaultDetails(
+            m_pFaultLossRateSpin->value(),
+            u64RandomSeed,
+            u32ProtectedGroupSize
         );
-        if (m_pFaultTypeCombo->currentIndex() != 2
-            && snpSender.modeAuthentication()
-                == tesla::protocol::UdpAuthenticationMode::Native
-            && snpSender.u32PacketsPerInterval() % u32ProtectedGroupSize != 0)
-        {
-            m_pStatusLabel->setText(QStringLiteral(
-                "标签保护分组必须整除每间隔发包数"
-            ));
-            return;
-        }
-
-        tesla::protocol::AuthenticationFaultDetails varFault =
-            tesla::protocol::FixedDelayFaultDetails(1);
-        if (m_pFaultTypeCombo->currentIndex() == 0)
-        {
-            std::uint64_t u64RandomSeed =
-                QRandomGenerator::global()->generate64();
-            if (u64RandomSeed == 0)
-            {
-                // 协议用零表示无效种子，极小概率取零时改用固定非零值。
-                u64RandomSeed = 1;
-            }
-            varFault = tesla::protocol::PacketLossFaultDetails(
-                m_pFaultLossRateSpin->value(),
-                u64RandomSeed,
-                u32ProtectedGroupSize
-            );
-        }
-        else if (m_pFaultTypeCombo->currentIndex() == 1)
-        {
-            varFault = tesla::protocol::LogicalDisconnectFaultDetails(
-                static_cast<std::uint32_t>(m_pFaultStartPacketSpin->value()),
-                static_cast<std::uint32_t>(m_pFaultDurationSpin->value()),
-                u32ProtectedGroupSize
-            );
-        }
-        else
-        {
-            varFault = tesla::protocol::FixedDelayFaultDetails(
-                static_cast<std::uint32_t>(m_pFaultDelaySpin->value())
-            );
-        }
-
-        if (!m_ctlAuthentication.bConfigureFaultPlan(
-                nSenderContextIndex,
-                std::move(varFault),
-                strError
-            ))
-        {
-            m_pStatusLabel->setText(strError);
-        }
-        refreshFaultControls();
     }
-    catch (const std::exception& exError)
+    else if (m_pFaultTypeCombo->currentIndex() == 1)
     {
-        m_pStatusLabel->setText(QString::fromUtf8(exError.what()));
-        refreshFaultControls();
+        varFault = tesla::protocol::LogicalDisconnectFaultDetails(
+            static_cast<std::uint32_t>(m_pFaultStartPacketSpin->value()),
+            static_cast<std::uint32_t>(m_pFaultDurationSpin->value()),
+            u32ProtectedGroupSize
+        );
     }
+    else
+    {
+        varFault = tesla::protocol::FixedDelayFaultDetails(
+            static_cast<std::uint32_t>(m_pFaultDelaySpin->value())
+        );
+    }
+
+    if (!m_ctlAuthentication.bConfigureFaultPlan(
+            nSenderContextIndex,
+            std::move(varFault),
+            strError
+        ))
+    {
+        m_pStatusLabel->setText(strError);
+    }
+    refreshFaultControls();
 }
 
 void ManagerMainWindow::refreshFaultControls()
 {
-    if (m_pFaultSenderCombo == nullptr || m_pFaultTypeCombo == nullptr)
-    {
-        return;
-    }
-
     const int nCurrentSenderIndex = m_pFaultSenderCombo->currentData().toInt();
     const QVector<ManagerSenderRoundSnapshot> vecSnapshots =
         m_ctlAuthentication.vecSenderRoundSnapshots();

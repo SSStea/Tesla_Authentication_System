@@ -427,12 +427,11 @@ public:
         const protocol::NodeControlMessage& msgMessage
     )
     {
-        if (bIsMutationMessage(msgMessage.typeMessage())
-            && roleClient == protocol::TcpClientRole::Monitor)
+        if (roleClient == protocol::TcpClientRole::Monitor)
         {
-            // 权限检查先于配置解析和状态机调用，MONITOR不能触发任何写操作。
-            if (msgMessage.typeMessage()
-                == protocol::NodeControlMessageType::SenderAuthenticationConfig)
+            switch (msgMessage.typeMessage())
+            {
+            case protocol::NodeControlMessageType::SenderAuthenticationConfig:
             {
                 const auto& detConfig = std::get<
                     protocol::SenderAuthenticationConfigControlDetails
@@ -445,9 +444,7 @@ public:
                     "Monitor clients cannot change sender authentication state"
                 );
             }
-
-            if (msgMessage.typeMessage()
-                == protocol::NodeControlMessageType::ReceiverAuthenticationContexts)
+            case protocol::NodeControlMessageType::ReceiverAuthenticationContexts:
             {
                 const auto& detConfig = std::get<
                     protocol::ReceiverAuthenticationContextsControlDetails
@@ -460,9 +457,7 @@ public:
                     "Monitor clients cannot change receiver authentication state"
                 );
             }
-
-            if (msgMessage.typeMessage()
-                == protocol::NodeControlMessageType::TextPayloadConfig)
+            case protocol::NodeControlMessageType::TextPayloadConfig:
             {
                 const auto& detPayload = std::get<
                     protocol::TextPayloadControlDetails
@@ -475,16 +470,54 @@ public:
                     "Monitor clients cannot change the authentication payload"
                 );
             }
-
-            const auto& detCommand = std::get<
-                protocol::AuthenticationRoundCommandControlDetails
-            >(msgMessage.varDetails());
-            return msgRoundAcknowledgement(
-                detCommand,
-                false,
-                "MONITOR_CONTROL_FORBIDDEN",
-                "Monitor clients cannot control authentication rounds"
-            );
+            case protocol::NodeControlMessageType::FaultInjectionConfig:
+            {
+                const auto& detFault = std::get<
+                    protocol::FaultInjectionControlDetails
+                >(msgMessage.varDetails());
+                return protocol::NodeControlMessage(
+                    protocol::ExperimentControlAcknowledgementDetails(
+                        detFault.strRequestId(),
+                        detFault.strRoundId(),
+                        false,
+                        "MONITOR_CONTROL_FORBIDDEN",
+                        "Monitor clients cannot change experiment controls"
+                    )
+                );
+            }
+            case protocol::NodeControlMessageType::AttackSourceMapping:
+            {
+                const auto& detMapping = std::get<
+                    protocol::AttackSourceMappingControlDetails
+                >(msgMessage.varDetails());
+                return protocol::NodeControlMessage(
+                    protocol::ExperimentControlAcknowledgementDetails(
+                        detMapping.strRequestId(),
+                        detMapping.strRoundId(),
+                        false,
+                        "MONITOR_CONTROL_FORBIDDEN",
+                        "Monitor clients cannot change source mappings"
+                    )
+                );
+            }
+            case protocol::NodeControlMessageType::RoundStart:
+            case protocol::NodeControlMessageType::RoundPause:
+            case protocol::NodeControlMessageType::RoundResume:
+            case protocol::NodeControlMessageType::RoundStop:
+            {
+                const auto& detCommand = std::get<
+                    protocol::AuthenticationRoundCommandControlDetails
+                >(msgMessage.varDetails());
+                return msgRoundAcknowledgement(
+                    detCommand,
+                    false,
+                    "MONITOR_CONTROL_FORBIDDEN",
+                    "Monitor clients cannot control authentication rounds"
+                );
+            }
+            default:
+                break;
+            }
         }
 
         switch (msgMessage.typeMessage())
@@ -550,7 +583,11 @@ public:
             std::lock_guard<std::mutex> lckConfig(m_mtxConfig);
             if (!m_optSenderContext.has_value())
             {
-                throw std::logic_error(
+                return msgConfigAcknowledgement(
+                    strRequestId,
+                    protocol::AuthenticationConfigTarget::FilePayload,
+                    false,
+                    "INVALID_FILE_PAYLOAD",
                     "Sender authentication configuration is missing"
                 );
             }
@@ -559,7 +596,11 @@ public:
                 m_optSenderContext->matMaterial();
             if (matMaterial.u64ChainId() != u64ChainId)
             {
-                throw std::invalid_argument(
+                return msgConfigAcknowledgement(
+                    strRequestId,
+                    protocol::AuthenticationConfigTarget::FilePayload,
+                    false,
+                    "INVALID_FILE_PAYLOAD",
                     "File payload chain ID does not match the sender context"
                 );
             }
@@ -569,7 +610,11 @@ public:
                 || wrkFile.u32PacketCount()
                     != matMaterial.prmRoundParameters().u32TotalPacketCount())
             {
-                throw std::invalid_argument(
+                return msgConfigAcknowledgement(
+                    strRequestId,
+                    protocol::AuthenticationConfigTarget::FilePayload,
+                    false,
+                    "INVALID_FILE_PAYLOAD",
                     "File payload size does not match the sender configuration"
                 );
             }
@@ -685,24 +730,6 @@ public:
     }
 
 private:
-    bool bIsMutationMessage(protocol::NodeControlMessageType typeMessage) const
-    {
-        return typeMessage
-                == protocol::NodeControlMessageType::SenderAuthenticationConfig
-            || typeMessage
-                == protocol::NodeControlMessageType::ReceiverAuthenticationContexts
-            || typeMessage
-                == protocol::NodeControlMessageType::TextPayloadConfig
-            || typeMessage
-                == protocol::NodeControlMessageType::FaultInjectionConfig
-            || typeMessage
-                == protocol::NodeControlMessageType::AttackSourceMapping
-            || typeMessage == protocol::NodeControlMessageType::RoundStart
-            || typeMessage == protocol::NodeControlMessageType::RoundPause
-            || typeMessage == protocol::NodeControlMessageType::RoundResume
-            || typeMessage == protocol::NodeControlMessageType::RoundStop;
-    }
-
     protocol::NodeControlMessage msgApplySenderConfig(
         const protocol::SenderAuthenticationConfigControlDetails& detConfig
     )
@@ -711,14 +738,22 @@ private:
         {
             if (m_runSender.bIsRunning())
             {
-                throw std::logic_error(
+                return msgConfigAcknowledgement(
+                    detConfig.strRequestId(),
+                    protocol::AuthenticationConfigTarget::Sender,
+                    false,
+                    "INVALID_AUTH_CONFIG",
                     "Sender configuration cannot change during an active round"
                 );
             }
 
             if (detConfig.strSenderId() != m_strNodeName)
             {
-                throw std::invalid_argument(
+                return msgConfigAcknowledgement(
+                    detConfig.strRequestId(),
+                    protocol::AuthenticationConfigTarget::Sender,
+                    false,
+                    "INVALID_AUTH_CONFIG",
                     "Sender authentication configuration targets another node"
                 );
             }
@@ -804,7 +839,11 @@ private:
         {
             if (m_runReceiver.bIsRunning())
             {
-                throw std::logic_error(
+                return msgConfigAcknowledgement(
+                    detConfig.strRequestId(),
+                    protocol::AuthenticationConfigTarget::Receiver,
+                    false,
+                    "INVALID_AUTH_CONFIG",
                     "Receiver configuration cannot change during an active round"
                 );
             }
@@ -910,7 +949,11 @@ private:
             std::lock_guard<std::mutex> lckConfig(m_mtxConfig);
             if (!m_optSenderContext.has_value())
             {
-                throw std::logic_error(
+                return msgConfigAcknowledgement(
+                    detPayload.strRequestId(),
+                    protocol::AuthenticationConfigTarget::TextPayload,
+                    false,
+                    "INVALID_TEXT_PAYLOAD",
                     "Sender authentication configuration is missing"
                 );
             }
@@ -918,7 +961,11 @@ private:
             if (m_optSenderContext->matMaterial().u64ChainId()
                 != detPayload.u64ChainId())
             {
-                throw std::invalid_argument(
+                return msgConfigAcknowledgement(
+                    detPayload.strRequestId(),
+                    protocol::AuthenticationConfigTarget::TextPayload,
+                    false,
+                    "INVALID_TEXT_PAYLOAD",
                     "Text payload chain ID does not match the sender context"
                 );
             }
@@ -976,8 +1023,14 @@ private:
             if (!m_optSenderContext.has_value()
                 || !m_runSender.bIsConfigured())
             {
-                throw std::logic_error(
-                    "Fault plan requires a prepared sender payload"
+                return protocol::NodeControlMessage(
+                    protocol::ExperimentControlAcknowledgementDetails(
+                        detFault.strRequestId(),
+                        detFault.strRoundId(),
+                        false,
+                        "FAULT_PLAN_REJECTED",
+                        "Fault plan requires a prepared sender payload"
+                    )
                 );
             }
 
@@ -986,8 +1039,14 @@ private:
             if (detFault.strTargetSenderId() != matMaterial.strSenderId()
                 || detFault.u64ChainId() != matMaterial.u64ChainId())
             {
-                throw std::invalid_argument(
-                    "Fault plan does not target this sender context"
+                return protocol::NodeControlMessage(
+                    protocol::ExperimentControlAcknowledgementDetails(
+                        detFault.strRequestId(),
+                        detFault.strRoundId(),
+                        false,
+                        "FAULT_PLAN_REJECTED",
+                        "Fault plan does not target this sender context"
+                    )
                 );
             }
 
@@ -1117,7 +1176,10 @@ private:
                 if (!m_runReceiver.bIsConfigured()
                     && !m_runSender.bIsConfigured())
                 {
-                    throw std::logic_error(
+                    return msgRoundAcknowledgement(
+                        detCommand,
+                        false,
+                        "ROUND_COMMAND_REJECTED",
                         "Node has no prepared sender or receiver context"
                     );
                 }

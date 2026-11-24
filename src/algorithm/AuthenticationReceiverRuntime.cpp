@@ -1000,14 +1000,7 @@ private:
         for (const protocol::AuthenticationObservation& varObservation
             : vecObservations)
         {
-            try
-            {
-                m_fnObservationHandler(varObservation);
-            }
-            catch (...)
-            {
-                // 平台观察回调异常不得终止Receiver工作线程。
-            }
+            m_fnObservationHandler(varObservation);
         }
     }
 
@@ -1022,14 +1015,7 @@ private:
 
         for (const metrics::AuthenticationMetricRecord& varMetric : vecMetrics)
         {
-            try
-            {
-                m_fnMetricHandler(varMetric);
-            }
-            catch (...)
-            {
-                // 指标展示或传输失败不得改变Receiver认证结果。
-            }
+            m_fnMetricHandler(varMetric);
         }
     }
 
@@ -3636,14 +3622,7 @@ private:
     {
         for (const AuthenticationRuntimeResult& resResult : vecResults)
         {
-            try
-            {
-                m_fnResultHandler(resResult);
-            }
-            catch (...)
-            {
-                // 节点适配层异常不得终止接收工作线程。
-            }
+            m_fnResultHandler(resResult);
         }
     }
 

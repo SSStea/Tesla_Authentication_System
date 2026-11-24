@@ -360,98 +360,71 @@ void TcpManagementServer::broadcastControlMessage(
 
 void TcpManagementServer::enqueueMonitorObservation(
     const protocol::AuthenticationObservation& varObservation
-) noexcept
+)
 {
-    try
-    {
-        const protocol::NodeControlMessage msgObservation = std::visit(
-            [](const auto& detObservation)
-            {
-                return protocol::NodeControlMessage(detObservation);
-            },
-            varObservation
-        );
-
-        std::lock_guard<std::mutex> lckQueue(m_mtxMonitorQueue);
-        if (m_deqMonitorQueue.size() >= MAX_MONITOR_EVENT_QUEUE)
+    const protocol::NodeControlMessage msgObservation = std::visit(
+        [](const auto& detObservation)
         {
-            if (msgObservation.typeMessage()
-                    == protocol::NodeControlMessageType::PacketFailureEvent)
-            {
-                // 队列拥塞时优先保留结构化失败；普通报文仍受服务端快照/缓存边界约束。
-                const auto itNormalPacket = std::find_if(
-                    m_deqMonitorQueue.begin(),
-                    m_deqMonitorQueue.end(),
-                    [](const protocol::NodeControlMessage& msgQueued)
-                    {
-                        return msgQueued.typeMessage()
-                            == protocol::NodeControlMessageType::PacketObservationEvent;
-                    }
-                );
-                if (itNormalPacket != m_deqMonitorQueue.end())
-                {
-                    m_deqMonitorQueue.erase(itNormalPacket);
-                    m_deqMonitorQueue.push_back(msgObservation);
-                    ++m_nDroppedMonitorEventCount;
-                    m_cndMonitorQueue.notify_one();
-                    return;
-                }
-            }
+            return protocol::NodeControlMessage(detObservation);
+        },
+        varObservation
+    );
 
-            ++m_nDroppedMonitorEventCount;
-            return;
+    std::lock_guard<std::mutex> lckQueue(m_mtxMonitorQueue);
+    if (m_deqMonitorQueue.size() >= MAX_MONITOR_EVENT_QUEUE)
+    {
+        if (msgObservation.typeMessage()
+                == protocol::NodeControlMessageType::PacketFailureEvent)
+        {
+            const auto itNormalPacket = std::find_if(
+                m_deqMonitorQueue.begin(),
+                m_deqMonitorQueue.end(),
+                [](const protocol::NodeControlMessage& msgQueued)
+                {
+                    return msgQueued.typeMessage()
+                        == protocol::NodeControlMessageType::PacketObservationEvent;
+                }
+            );
+            if (itNormalPacket != m_deqMonitorQueue.end())
+            {
+                m_deqMonitorQueue.erase(itNormalPacket);
+                m_deqMonitorQueue.push_back(msgObservation);
+                ++m_nDroppedMonitorEventCount;
+                m_cndMonitorQueue.notify_one();
+                return;
+            }
         }
 
-        m_deqMonitorQueue.push_back(msgObservation);
-        m_cndMonitorQueue.notify_one();
-    }
-    catch (...)
-    {
         ++m_nDroppedMonitorEventCount;
+        return;
     }
+
+    m_deqMonitorQueue.push_back(msgObservation);
+    m_cndMonitorQueue.notify_one();
 }
 
 void TcpManagementServer::enqueueMonitorMetric(
     const metrics::AuthenticationMetricRecord& varMetric
-) noexcept
+)
 {
-    try
-    {
-        std::lock_guard<std::mutex> lckQueue(m_mtxMonitorQueue);
-        if (m_deqMetricQueue.size() >= MAX_METRIC_EVENT_QUEUE)
-        {
-            ++m_nDroppedMonitorEventCount;
-            return;
-        }
-
-        m_deqMetricQueue.push_back(varMetric);
-        m_cndMonitorQueue.notify_one();
-    }
-    catch (...)
+    std::lock_guard<std::mutex> lckQueue(m_mtxMonitorQueue);
+    if (m_deqMetricQueue.size() >= MAX_METRIC_EVENT_QUEUE)
     {
         ++m_nDroppedMonitorEventCount;
+        return;
     }
+
+    m_deqMetricQueue.push_back(varMetric);
+    m_cndMonitorQueue.notify_one();
 }
 
 void TcpManagementServer::requestRoundDrainAcknowledgement(
     std::string strRoundId
-) noexcept
+)
 {
-    if (strRoundId.empty())
-    {
-        return;
-    }
-
-    try
-    {
-        std::lock_guard<std::mutex> lckDrain(m_mtxRoundDrain);
-        m_optPendingRoundDrainId = std::move(strRoundId);
-        m_cndRoundDrain.notify_all();
-    }
-    catch (...)
-    {
-        // 排空确认只控制下一轮准入，不能影响当前认证结果上报。
-    }
+    std::lock_guard<std::mutex> lckDrain(m_mtxRoundDrain);
+    m_optPendingRoundDrainId = std::move(strRoundId);
+    m_cndRoundDrain.notify_all();
 }
 
 void TcpManagementServer::monitorBroadcastLoop()
@@ -655,19 +628,12 @@ void TcpManagementServer::roundDrainLoop()
             m_optPendingRoundDrainId.reset();
         }
 
-        try
-        {
-            broadcastManagerControlMessage(protocol::NodeControlMessage(
-                protocol::AuthenticationRoundDrainAcknowledgementControlDetails(
-                    strRoundId,
-                    m_strNodeName
-                )
-            ));
-        }
-        catch (...)
-        {
-            // 排空消息构造或发送失败不会终止NodeAgent服务线程。
-        }
+        broadcastManagerControlMessage(protocol::NodeControlMessage(
+            protocol::AuthenticationRoundDrainAcknowledgementControlDetails(
+                strRoundId,
+                m_strNodeName
+            )
+        ));
     }
 }
 

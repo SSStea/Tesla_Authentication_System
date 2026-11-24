@@ -867,30 +867,23 @@ private:
             return;
         }
 
-        try
+        std::lock_guard<std::mutex> lckObservation(m_mtxObservation);
+        if (m_deqPendingPacketObservations.size()
+            >= MAX_PENDING_PACKET_OBSERVATIONS)
         {
-            std::lock_guard<std::mutex> lckObservation(m_mtxObservation);
-            if (m_deqPendingPacketObservations.size()
-                >= MAX_PENDING_PACKET_OBSERVATIONS)
-            {
-                return;
-            }
+            return;
+        }
 
-            m_deqPendingPacketObservations.push_back(
-                PendingPacketObservation{
-                    m_u64NextObservationEventId++,
-                    &vecDatagram,
-                    bSent,
-                    u64TimestampMilliseconds,
-                    strReason
-                }
-            );
-            m_cndObservation.notify_one();
-        }
-        catch (...)
-        {
-            // 观测排队失败不能改变真实UDP发送结果。
-        }
+        m_deqPendingPacketObservations.push_back(
+            PendingPacketObservation{
+                m_u64NextObservationEventId++,
+                &vecDatagram,
+                bSent,
+                u64TimestampMilliseconds,
+                strReason
+            }
+        );
+        m_cndObservation.notify_one();
     }
 
     void processPacketObservations() noexcept
@@ -1191,46 +1184,44 @@ private:
             return;
         }
 
-        try
+        const SenderAuthenticationMaterial& matMaterial =
+            m_optSenderContext->matMaterial();
+        const AuthenticationRoundParameters& prmRound =
+            matMaterial.prmRoundParameters();
+        const protocol::UdpAuthenticationPacketDecodeResult resPacket =
+            protocol::UdpAuthenticationPacketCodec::resDecode(
+                vecDatagram,
+                ctxCreatePacketContext(prmRound)
+            );
+        if (!std::holds_alternative<protocol::UdpAuthenticationPacket>(
+                resPacket
+            ))
         {
-            const SenderAuthenticationMaterial& matMaterial =
-                m_optSenderContext->matMaterial();
-            const AuthenticationRoundParameters& prmRound =
-                matMaterial.prmRoundParameters();
-            const protocol::UdpAuthenticationPacketDecodeResult resPacket =
-                protocol::UdpAuthenticationPacketCodec::resDecode(
-                    vecDatagram,
-                    ctxCreatePacketContext(prmRound)
-                );
-            if (!std::holds_alternative<protocol::UdpAuthenticationPacket>(
-                    resPacket
-                ))
-            {
-                return;
-            }
+            return;
+        }
 
-            const protocol::UdpAuthenticationPacket& udpPacket = std::get<
-                protocol::UdpAuthenticationPacket
-            >(resPacket);
-            std::uint32_t u32IntervalIndex = 0;
-            std::uint32_t u32PacketIndex = 0;
-            if (udpPacket.bIsDataPacket())
-            {
-                const protocol::UdpDataPacket& udpData = std::get<
-                    protocol::UdpDataPacket
-                >(udpPacket.varDetails());
-                u32IntervalIndex = udpData.u32IntervalIndex();
-                u32PacketIndex = udpData.u32PacketIndex();
-            }
-            else
-            {
-                u32IntervalIndex = std::get<protocol::UdpDisclosurePacket>(
-                    udpPacket.varDetails()
-                ).u32IntervalIndex();
-            }
+        const protocol::UdpAuthenticationPacket& udpPacket = std::get<
+            protocol::UdpAuthenticationPacket
+        >(resPacket);
+        std::uint32_t u32IntervalIndex = 0;
+        std::uint32_t u32PacketIndex = 0;
+        if (udpPacket.bIsDataPacket())
+        {
+            const protocol::UdpDataPacket& udpData = std::get<
+                protocol::UdpDataPacket
+            >(udpPacket.varDetails());
+            u32IntervalIndex = udpData.u32IntervalIndex();
+            u32PacketIndex = udpData.u32PacketIndex();
+        }
+        else
+        {
+            u32IntervalIndex = std::get<protocol::UdpDisclosurePacket>(
+                udpPacket.varDetails()
+            ).u32IntervalIndex();
+        }
 
-            m_fnObservationHandler(protocol::AuthenticationObservation(
-                protocol::PacketObservationControlDetails(
+        m_fnObservationHandler(protocol::AuthenticationObservation(
+            protocol::PacketObservationControlDetails(
                     u64EventId,
                     u64TimestampMilliseconds,
                     m_strRoundId,
@@ -1263,13 +1254,8 @@ private:
                         udpPacket
                     ),
                     vecDatagram
-                )
-            ));
-        }
-        catch (...)
-        {
-            // 监控回调异常不能破坏绝对时间发包线程。
-        }
+            )
+        ));
     }
 
     void recordSentAuthenticationFields(
@@ -1282,63 +1268,56 @@ private:
             return;
         }
 
-        try
-        {
-            const AuthenticationRoundParameters& prmRound =
-                m_optSenderContext->matMaterial().prmRoundParameters();
-            const protocol::UdpAuthenticationPacketDecodeResult resPacket =
-                protocol::UdpAuthenticationPacketCodec::resDecode(
-                    vecDatagram,
-                    ctxCreatePacketContext(prmRound)
-                );
-            if (!std::holds_alternative<protocol::UdpAuthenticationPacket>(
-                    resPacket
-                ))
-            {
-                return;
-            }
-
-            const protocol::UdpAuthenticationPacket& udpPacket = std::get<
-                protocol::UdpAuthenticationPacket
-            >(resPacket);
-            if (!udpPacket.bIsDataPacket())
-            {
-                m_optCommunicationAccumulator->addDisclosedKey();
-                return;
-            }
-
-            const protocol::UdpDataPacket& udpData = std::get<
-                protocol::UdpDataPacket
-            >(udpPacket.varDetails());
-            if (udpData.optDisclosedKey().has_value())
-            {
-                m_optCommunicationAccumulator->addDisclosedKey();
-            }
-
-            if (std::holds_alternative<
-                    protocol::NativeUdpAuthenticationDetails
-                >(udpData.varAuthenticationDetails()))
-            {
-                m_optCommunicationAccumulator->addNativeDataPacket();
-                return;
-            }
-
-            const auto& detImproved = std::get<
-                protocol::ImprovedUdpAuthenticationDetails
-            >(udpData.varAuthenticationDetails());
-            const std::size_t nTauCount =
-                detImproved.optGroupDetails().has_value()
-                ? detImproved.optGroupDetails()->vecSamdTau().size()
-                : 0;
-            m_optCommunicationAccumulator->addImprovedDataPacket(
-                nTauCount,
-                detImproved.optGroupDetails().has_value()
+        const AuthenticationRoundParameters& prmRound =
+            m_optSenderContext->matMaterial().prmRoundParameters();
+        const protocol::UdpAuthenticationPacketDecodeResult resPacket =
+            protocol::UdpAuthenticationPacketCodec::resDecode(
+                vecDatagram,
+                ctxCreatePacketContext(prmRound)
             );
-        }
-        catch (...)
+        if (!std::holds_alternative<protocol::UdpAuthenticationPacket>(
+                resPacket
+            ))
         {
-            // 指标累计失败不能改变真实UDP发送结果。
+            return;
         }
+
+        const protocol::UdpAuthenticationPacket& udpPacket = std::get<
+            protocol::UdpAuthenticationPacket
+        >(resPacket);
+        if (!udpPacket.bIsDataPacket())
+        {
+            m_optCommunicationAccumulator->addDisclosedKey();
+            return;
+        }
+
+        const protocol::UdpDataPacket& udpData = std::get<
+            protocol::UdpDataPacket
+        >(udpPacket.varDetails());
+        if (udpData.optDisclosedKey().has_value())
+        {
+            m_optCommunicationAccumulator->addDisclosedKey();
+        }
+
+        if (std::holds_alternative<
+                protocol::NativeUdpAuthenticationDetails
+            >(udpData.varAuthenticationDetails()))
+        {
+            m_optCommunicationAccumulator->addNativeDataPacket();
+            return;
+        }
+
+        const auto& detImproved = std::get<
+            protocol::ImprovedUdpAuthenticationDetails
+        >(udpData.varAuthenticationDetails());
+        const std::size_t nTauCount =
+            detImproved.optGroupDetails().has_value()
+            ? detImproved.optGroupDetails()->vecSamdTau().size()
+            : 0;
+        m_optCommunicationAccumulator->addImprovedDataPacket(
+            nTauCount,
+            detImproved.optGroupDetails().has_value()
+        );
     }
 
     void emitKeyChainProgress(
@@ -1351,37 +1330,30 @@ private:
             return;
         }
 
-        try
-        {
-            const SenderAuthenticationMaterial& matMaterial =
-                m_optSenderContext->matMaterial();
-            const AuthenticationRoundParameters& prmRound =
-                matMaterial.prmRoundParameters();
-            const std::uint32_t u32DataIntervalCount =
-                static_cast<std::uint32_t>(prmRound.nDataIntervalCount());
-            const std::uint32_t u32CurrentKeyIndex =
-                u32LogicalInterval <= u32DataIntervalCount && !bCompleted
-                ? u32LogicalInterval
-                : 0;
-            const std::uint32_t u32DisclosedThrough =
-                u32LogicalInterval > prmRound.u32DisclosureDelay()
-                ? std::min(
-                    u32DataIntervalCount,
-                    u32LogicalInterval - prmRound.u32DisclosureDelay()
-                )
-                : 0;
-            emitLocalKeyChainObservation(LocalSenderKeyChainProgress(
-                m_strRoundId,
-                matMaterial.u64ChainId(),
-                u32CurrentKeyIndex,
-                bCompleted ? u32DataIntervalCount : u32DisclosedThrough,
-                bCompleted
-            ));
-        }
-        catch (...)
-        {
-            // 本地密钥链展示失败不能影响认证发送结果。
-        }
+        const SenderAuthenticationMaterial& matMaterial =
+            m_optSenderContext->matMaterial();
+        const AuthenticationRoundParameters& prmRound =
+            matMaterial.prmRoundParameters();
+        const std::uint32_t u32DataIntervalCount =
+            static_cast<std::uint32_t>(prmRound.nDataIntervalCount());
+        const std::uint32_t u32CurrentKeyIndex =
+            u32LogicalInterval <= u32DataIntervalCount && !bCompleted
+            ? u32LogicalInterval
+            : 0;
+        const std::uint32_t u32DisclosedThrough =
+            u32LogicalInterval > prmRound.u32DisclosureDelay()
+            ? std::min(
+                u32DataIntervalCount,
+                u32LogicalInterval - prmRound.u32DisclosureDelay()
+            )
+            : 0;
+        emitLocalKeyChainObservation(LocalSenderKeyChainProgress(
+            m_strRoundId,
+            matMaterial.u64ChainId(),
+            u32CurrentKeyIndex,
+            bCompleted ? u32DataIntervalCount : u32DisclosedThrough,
+            bCompleted
+        ));
     }
 
     void emitSchedulingFailure() noexcept
@@ -1391,12 +1363,10 @@ private:
             return;
         }
 
-        try
-        {
-            const SenderAuthenticationMaterial& matMaterial =
-                m_optSenderContext->matMaterial();
-            m_fnObservationHandler(protocol::AuthenticationObservation(
-                protocol::PacketFailureControlDetails(
+        const SenderAuthenticationMaterial& matMaterial =
+            m_optSenderContext->matMaterial();
+        m_fnObservationHandler(protocol::AuthenticationObservation(
+            protocol::PacketFailureControlDetails(
                     m_u64NextObservationEventId++,
                     0,
                     u64NowMilliseconds(),
@@ -1417,13 +1387,8 @@ private:
                     "",
                     {},
                     1
-                )
-            ));
-        }
-        catch (...)
-        {
-            // 调度失败日志属于观测面，不能掩盖原始运行时结果。
-        }
+            )
+        ));
     }
 
     void emitLocalKeyChainObservation(
@@ -1435,14 +1400,7 @@ private:
             return;
         }
 
-        try
-        {
-            m_fnLocalKeyChainHandler(varObservation);
-        }
-        catch (...)
-        {
-            // 私有展示回调只服务本机GUI，不参与协议状态机。
-        }
+        m_fnLocalKeyChainHandler(varObservation);
     }
 
     void emitResult(

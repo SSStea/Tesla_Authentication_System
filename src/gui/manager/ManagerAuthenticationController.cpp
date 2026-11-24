@@ -6,7 +6,6 @@
 #include "protocol/NodeControlJsonCodec.h"
 #include "workload/FileWorkload.h"
 
-#include <QCryptographicHash>
 #include <QDateTime>
 #include <QStringList>
 #include <QUuid>
@@ -67,11 +66,6 @@ core::TeslaAuthenticationMode modeCore(
 
 protocol::BinaryBlock arrBlock(const crypto::ByteBuffer& vecBytes)
 {
-    if (vecBytes.size() != protocol::BINARY_BLOCK_SIZE)
-    {
-        throw std::invalid_argument("Authentication block must contain 32 bytes");
-    }
-
     protocol::BinaryBlock arrResult{};
     std::copy(vecBytes.begin(), vecBytes.end(), arrResult.begin());
     return arrResult;
@@ -146,42 +140,6 @@ ManagerTextRoundConfiguration::ManagerTextRoundConfiguration(
       m_optImprovedParameters(std::move(optImprovedParameters)),
       m_strText(std::move(strText))
 {
-    const QByteArray arrText = m_strText.toUtf8();
-    if (m_u32TextRepeatCount == 0 || m_u32PacketsPerInterval == 0
-        || m_u32DisclosureDelay == 0 || m_u32IntervalMilliseconds == 0)
-    {
-        throw std::invalid_argument(
-            "Text authentication counts and timing must be positive"
-        );
-    }
-
-    if (arrText.isEmpty()
-        || arrText.size() > static_cast<qsizetype>(
-            tesla::protocol::BINARY_BLOCK_SIZE
-        )
-        || arrText.contains('\0'))
-    {
-        throw std::invalid_argument(
-            "Text payload must contain 1 to 32 UTF-8 bytes without zero bytes"
-        );
-    }
-
-    if (m_modeAuthentication == tesla::protocol::UdpAuthenticationMode::Native
-        && m_optImprovedParameters.has_value())
-    {
-        throw std::invalid_argument(
-            "Native TESLA must not contain improved parameters"
-        );
-    }
-
-    if (m_modeAuthentication
-            == tesla::protocol::UdpAuthenticationMode::Improved
-        && !m_optImprovedParameters.has_value())
-    {
-        throw std::invalid_argument(
-            "Improved TESLA requires grouping parameters"
-        );
-    }
 }
 
 tesla::protocol::UdpAuthenticationMode
@@ -251,38 +209,6 @@ ManagerFileRoundConfiguration::ManagerFileRoundConfiguration(
       m_ptrFileBytes(std::move(ptrFileBytes)),
       m_arrOriginalSha256(std::move(arrOriginalSha256))
 {
-    if (m_u32PacketsPerInterval == 0 || m_u32DisclosureDelay == 0
-        || m_u32IntervalMilliseconds == 0 || !m_ptrFileBytes
-        || m_ptrFileBytes->isEmpty()
-        || m_ptrFileBytes->size() > static_cast<qsizetype>(
-            tesla::workload::FileWorkload::MAXIMUM_FILE_SIZE
-        )
-        || m_arrOriginalSha256.size()
-            != static_cast<qsizetype>(tesla::protocol::BINARY_BLOCK_SIZE)
-        || QCryptographicHash::hash(
-                *m_ptrFileBytes,
-                QCryptographicHash::Sha256
-            ) != m_arrOriginalSha256)
-    {
-        throw std::invalid_argument("File authentication input is invalid");
-    }
-
-    if (m_modeAuthentication == tesla::protocol::UdpAuthenticationMode::Native
-        && m_optImprovedParameters.has_value())
-    {
-        throw std::invalid_argument(
-            "Native TESLA must not contain improved parameters"
-        );
-    }
-
-    if (m_modeAuthentication
-            == tesla::protocol::UdpAuthenticationMode::Improved
-        && !m_optImprovedParameters.has_value())
-    {
-        throw std::invalid_argument(
-            "Improved TESLA requires grouping parameters"
-        );
-    }
 }
 
 tesla::protocol::UdpAuthenticationMode
@@ -427,15 +353,19 @@ bool ManagerAuthenticationController::bPrepareTextRound(
     QString& strError
 )
 {
+    if (m_bRoundRunning)
+    {
+        strError = QStringLiteral("必须先停止当前认证轮次");
+        return false;
+    }
+    if (setSelectedSenderEndpoints.isEmpty())
+    {
+        strError = QStringLiteral("至少选择一个已连接的 Sender");
+        return false;
+    }
+
     try
     {
-        if (m_bRoundRunning)
-        {
-            throw std::logic_error(
-                "An active authentication round must be stopped first"
-            );
-        }
-
         resetPreparedRound();
         m_bFileRound = false;
         m_strRoundId = QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -454,21 +384,11 @@ bool ManagerAuthenticationController::bPrepareTextRound(
             }
         }
 
-        if (setSelectedSenderEndpoints.isEmpty())
-        {
-            throw std::invalid_argument("Select at least one connected Sender");
-        }
-        if (m_setParticipantEndpoints.isEmpty())
-        {
-            throw std::invalid_argument(
-                "No connected authentication participant is available"
-            );
-        }
         if (m_setParticipantEndpoints.size() < 2)
         {
-            throw std::invalid_argument(
-                "Text authentication requires at least two connected nodes"
-            );
+            resetPreparedRound();
+            strError = QStringLiteral("文本认证至少需要两个已连接节点");
+            return false;
         }
 
         std::optional<tesla::core::ImprovedTeslaParameters>
@@ -502,9 +422,9 @@ bool ManagerAuthenticationController::bPrepareTextRound(
             const auto itrSnapshot = mapSnapshots.find(strEndpointKey);
             if (itrSnapshot == mapSnapshots.end())
             {
-                throw std::invalid_argument(
-                    "Every selected Sender must remain connected"
-                );
+                resetPreparedRound();
+                strError = QStringLiteral("选中的 Sender 已断开连接");
+                return false;
             }
 
             tesla::core::SenderAuthenticationMaterial matMaterial =
@@ -666,15 +586,19 @@ bool ManagerAuthenticationController::bPrepareFileRound(
     QString& strError
 )
 {
+    if (m_bRoundRunning)
+    {
+        strError = QStringLiteral("必须先停止当前认证轮次");
+        return false;
+    }
+    if (setSelectedSenderEndpoints.isEmpty())
+    {
+        strError = QStringLiteral("至少选择一个已连接的 Sender");
+        return false;
+    }
+
     try
     {
-        if (m_bRoundRunning)
-        {
-            throw std::logic_error(
-                "An active authentication round must be stopped first"
-            );
-        }
-
         resetPreparedRound();
         m_bFileRound = true;
         m_strRoundId = QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -693,15 +617,11 @@ bool ManagerAuthenticationController::bPrepareFileRound(
             }
         }
 
-        if (setSelectedSenderEndpoints.isEmpty())
-        {
-            throw std::invalid_argument("Select at least one connected Sender");
-        }
         if (m_setParticipantEndpoints.size() < 2)
         {
-            throw std::invalid_argument(
-                "File authentication requires at least two connected nodes"
-            );
+            resetPreparedRound();
+            strError = QStringLiteral("文件认证至少需要两个已连接节点");
+            return false;
         }
 
         const std::uint64_t u64OriginalByteCount =
@@ -744,9 +664,9 @@ bool ManagerAuthenticationController::bPrepareFileRound(
             const auto itrSnapshot = mapSnapshots.find(strEndpointKey);
             if (itrSnapshot == mapSnapshots.end())
             {
-                throw std::invalid_argument(
-                    "Every selected Sender must remain connected"
-                );
+                resetPreparedRound();
+                strError = QStringLiteral("选中的 Sender 已断开连接");
+                return false;
             }
 
             tesla::core::SenderAuthenticationMaterial matMaterial =
@@ -1642,22 +1562,8 @@ ManagerAuthenticationController::prmControlParameters(
         );
     }
 
-    tesla::protocol::AuthenticationCryptoAlgorithm algControl =
-        tesla::protocol::AuthenticationCryptoAlgorithm::Sha256;
-    if (prmParameters.algCryptoAlgorithm()
-        == tesla::crypto::CryptoAlgorithm::Sm3)
-    {
-        algControl = tesla::protocol::AuthenticationCryptoAlgorithm::Sm3;
-    }
-    else if (prmParameters.algCryptoAlgorithm()
-        == tesla::crypto::CryptoAlgorithm::Sha3_256)
-    {
-        algControl =
-            tesla::protocol::AuthenticationCryptoAlgorithm::Sha3_256;
-    }
-
     return tesla::protocol::AuthenticationRoundControlParameters(
-        algControl,
+        algControl(prmParameters.algCryptoAlgorithm()),
         prmParameters.modeAuthentication()
                 == tesla::core::TeslaAuthenticationMode::Native
             ? tesla::protocol::UdpAuthenticationMode::Native

@@ -717,14 +717,24 @@ bool PcNodeNetworkController::bHandleJson(
             );
         }
 
+        if (ptrClient->bFilePreparationRunning.load())
+        {
+            return bSendNodeControl(
+                ptrClient,
+                NodeControlMessage(
+                    AuthenticationConfigAcknowledgementControlDetails(
+                        detUpload.strRequestId(),
+                        AuthenticationConfigTarget::FilePayload,
+                        false,
+                        "FILE_PREPARATION_ACTIVE",
+                        "The previous file is still being prepared"
+                    )
+                )
+            );
+        }
+
         try
         {
-            if (ptrClient->bFilePreparationRunning.load())
-            {
-                throw std::logic_error(
-                    "The previous file is still being prepared"
-                );
-            }
             ptrClient->uplFile.begin(
                 detUpload.strRequestId(),
                 detUpload.u64ChainId(),

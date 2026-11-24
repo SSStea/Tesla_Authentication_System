@@ -191,8 +191,7 @@ QWidget* AttackTestMainWindow::pCreateDatagramPage()
         this,
         [this](QTableWidgetItem* pItem)
         {
-            if (m_bRefreshingRecords || pItem == nullptr
-                || pItem->column() != 2)
+            if (m_bRefreshingRecords || pItem->column() != 2)
             {
                 return;
             }
@@ -201,13 +200,10 @@ QWidget* AttackTestMainWindow::pCreateDatagramPage()
                 pItem->row(),
                 0
             );
-            if (pTimeItem != nullptr)
-            {
-                m_mapEditedMessages.insert(
-                    pTimeItem->data(Qt::UserRole).toULongLong(),
-                    pItem->text().trimmed().toUpper()
-                );
-            }
+            m_mapEditedMessages.insert(
+                pTimeItem->data(Qt::UserRole).toULongLong(),
+                pItem->text().trimmed().toUpper()
+            );
 
             if (m_bRecordRefreshPending)
             {

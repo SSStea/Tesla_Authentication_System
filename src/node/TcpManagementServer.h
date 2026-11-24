@@ -70,13 +70,13 @@ public:
     /** @brief 将高频观察事件放入有界队列，只异步发送给MONITOR客户端。 */
     void enqueueMonitorObservation(
         const protocol::AuthenticationObservation& varObservation
-    ) noexcept;
+    );
     /** @brief 指标使用独立有界队列，并在发送线程内最多64条合并为一帧。 */
     void enqueueMonitorMetric(
         const metrics::AuthenticationMetricRecord& varMetric
-    ) noexcept;
+    );
     /** @brief 等待本轮算法与全部后台遥测写出后向Manager发送排空确认。 */
-    void requestRoundDrainAcknowledgement(std::string strRoundId) noexcept;
+    void requestRoundDrainAcknowledgement(std::string strRoundId);
 
 private:
     struct ClientConnection;

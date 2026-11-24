@@ -142,7 +142,7 @@ QWidget* UavMonitorMainWindow::pCreateConnectionPage()
     QVBoxLayout* pLayout = new QVBoxLayout(pPage);
 
     QHBoxLayout* pConnectionLayout = new QHBoxLayout();
-    m_pHostEdit = new QLineEdit(QStringLiteral("127.0.0.1"), pPage);
+    m_pHostEdit = new QLineEdit(QStringLiteral("192.168.19.128"), pPage);
     m_pPortSpin = new QSpinBox(pPage);
     m_pPortSpin->setRange(1, 65535);
     QPushButton* pConnectButton = new QPushButton(QStringLiteral("连接"), pPage);

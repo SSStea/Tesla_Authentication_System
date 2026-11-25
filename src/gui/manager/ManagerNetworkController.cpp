@@ -9,6 +9,7 @@
 
 #include <QAbstractSocket>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QHostAddress>
 #include <QNetworkAddressEntry>
 #include <QNetworkInterface>
@@ -33,6 +34,7 @@ constexpr qsizetype FILE_UPLOAD_CHUNK_SIZE = static_cast<qsizetype>(
 );
 constexpr qint64 MAXIMUM_FILE_UPLOAD_SOCKET_BACKLOG = 256 * 1024;
 constexpr qint64 FILE_UPLOAD_END_FRAME_RESERVE = 4096;
+constexpr qint64 STATUS_POLL_INTERVAL_MILLISECONDS = 1000;
 
 QString strRoleName(NodeRole roleNode)
 {
@@ -172,6 +174,8 @@ struct ManagerNetworkController::EndpointState final
     bool                   bSenderRunning = false;
     bool                   bReceiverRunning = false;
     qint64                 nLastPresenceMilliseconds = 0;
+    QElapsedTimer          tmrLastTcpResponse;
+    QElapsedTimer          tmrLastStatusRequest;
     int                    nAddressScore = -10000;
     QTcpSocket*            pSocket = nullptr;
     TcpFrameStreamDecoder  decStream;
@@ -751,6 +755,7 @@ void ManagerNetworkController::connectEndpoint(
     pSocket->setProxy(QNetworkProxy::NoProxy);
     ptrEndpoint->pSocket = pSocket;
     ptrEndpoint->stateConnection = ManagerConnectionState::Connecting;
+    ptrEndpoint->tmrLastTcpResponse.start();
     ptrEndpoint->decStream.reset();
 
     connect(
@@ -760,6 +765,7 @@ void ManagerNetworkController::connectEndpoint(
         [this, ptrEndpoint]()
         {
             ptrEndpoint->stateConnection = ManagerConnectionState::Connected;
+            ptrEndpoint->tmrLastTcpResponse.start();
             emit logMessage(QStringLiteral("已连接 %1 (%2:%3)")
                 .arg(ptrEndpoint->strNodeName, ptrEndpoint->strIpAddress)
                 .arg(ptrEndpoint->u16ManagementPort));
@@ -886,7 +892,8 @@ void ManagerNetworkController::processNodeControlFrame(
     }
 
     const NodeControlMessage& msgMessage = std::get<NodeControlMessage>(resMessage);
-    // 已通过强类型解码的TCP响应同样证明节点在线，避免同机UDP复用或丢包误离线。
+    // TCP连接独立计时，UDP心跳既不导致误断开，也不能掩盖TCP失去响应。
+    ptrEndpoint->tmrLastTcpResponse.start();
     ptrEndpoint->nLastPresenceMilliseconds =
         QDateTime::currentMSecsSinceEpoch();
     if (msgMessage.typeMessage() != NodeControlMessageType::StatusResponse
@@ -941,6 +948,7 @@ void ManagerNetworkController::sendStatusRequest(
     const std::shared_ptr<EndpointState>& ptrEndpoint
 )
 {
+    ptrEndpoint->tmrLastStatusRequest.start();
     const std::string strRequestId = strCreateRequestId(
         QStringLiteral("status")
     ).toStdString();
@@ -957,18 +965,16 @@ void ManagerNetworkController::sendStatusRequest(
 
 void ManagerNetworkController::checkOfflineNodes()
 {
-    const qint64 nNowMilliseconds = QDateTime::currentMSecsSinceEpoch();
     bool bChanged = false;
     for (const std::shared_ptr<EndpointState>& ptrEndpoint : m_mapEndpoints)
     {
-        if (ptrEndpoint->nLastPresenceMilliseconds <= 0
-            || nNowMilliseconds - ptrEndpoint->nLastPresenceMilliseconds
-                < m_durOfflineTimeout.count())
+        if (ptrEndpoint->stateConnection == ManagerConnectionState::Disconnected)
         {
             continue;
         }
 
-        if (ptrEndpoint->stateConnection != ManagerConnectionState::Disconnected)
+        if (ptrEndpoint->tmrLastTcpResponse.elapsed()
+            >= m_durOfflineTimeout.count())
         {
             if (ptrEndpoint->pSocket != nullptr)
             {
@@ -979,12 +985,19 @@ void ManagerNetworkController::checkOfflineNodes()
             ptrEndpoint->bSenderRunning = false;
             ptrEndpoint->bReceiverRunning = false;
             bChanged = true;
+            emit logMessage(QStringLiteral("节点 %1 TCP连接或响应超时，已关闭连接")
+                .arg(ptrEndpoint->strNodeName));
+        }
+        else if (ptrEndpoint->stateConnection == ManagerConnectionState::Connected
+            && ptrEndpoint->tmrLastStatusRequest.elapsed()
+                >= STATUS_POLL_INTERVAL_MILLISECONDS)
+        {
+            sendStatusRequest(ptrEndpoint);
         }
     }
 
     if (bChanged)
     {
-        emit logMessage(QStringLiteral("节点心跳超时，已关闭对应TCP连接"));
         emit nodesChanged();
     }
     else if (!m_mapEndpoints.isEmpty())

@@ -75,6 +75,8 @@ out/windows/Release/tesla_attack_test_gui.exe
 
 节点继续在 UDP `37020` 监听扫描请求。Manager 使用系统分配的独占临时 UDP 端口发送扫描，并在该端口接收公告和后续心跳，不再与同机 PC 节点或攻击测试端共用 `37020`。节点记录最近一次扫描来源的 IP 和端口，把周期心跳回送到该端点。Manager 重启后需要重新扫描以更新心跳目标。
 
+Manager 对已连接节点每秒发送一次 TCP 状态查询，使用独立的单调计时器判断 TCP 响应是否超时（默认 3 秒）。UDP 心跳缺失不关闭正常的 TCP 连接，UDP 心跳持续到达也不能掩盖 TCP 无响应。更新此机制时，应同步重新生成并更新 Manager、PC 节点、攻击测试端和 Linux NodeAgent；发现 JSON 格式及公共函数接口保持不变。
+
 Qt 和 OpenSSL 的默认位置集中在 `projects/TeslaWindows.props`：
 
 ```xml

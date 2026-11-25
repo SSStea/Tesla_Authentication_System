@@ -2,9 +2,11 @@
 
 #include <QChart>
 #include <QChartView>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLineSeries>
 #include <QPainter>
+#include <QPushButton>
 #include <QString>
 #include <QValueAxis>
 #include <QVBoxLayout>
@@ -54,12 +56,13 @@ QWidget* pCreateChartPage(
     const QString& strHint,
     QLabel*& pSummary,
     QLabel*& pSecondarySummary,
-    QChart*& pChart
+    QChart*& pChart,
+    const std::function<void()>& fnClear
 )
 {
-    QWidget* pPage = new QWidget(pParent);
+    QWidget*     pPage = new QWidget(pParent);
     QVBoxLayout* pLayout = new QVBoxLayout(pPage);
-    QLabel* pTitle = new QLabel(strTitle, pPage);
+    QLabel*      pTitle = new QLabel(strTitle, pPage);
     pTitle->setObjectName(QStringLiteral("sectionTitleLabel"));
     QLabel* pHint = new QLabel(strHint, pPage);
     pHint->setWordWrap(true);
@@ -74,7 +77,17 @@ QWidget* pCreateChartPage(
     QChartView* pChartView = new QChartView(pChart, pPage);
     pChartView->setRenderHint(QPainter::Antialiasing);
 
-    pLayout->addWidget(pTitle);
+    QHBoxLayout* pHeaderLayout = new QHBoxLayout();
+    QPushButton* pClearButton = new QPushButton(
+        QStringLiteral("清空当前图表"),
+        pPage
+    );
+    pHeaderLayout->addWidget(pTitle);
+    pHeaderLayout->addStretch();
+    pHeaderLayout->addWidget(pClearButton);
+    QObject::connect(pClearButton, &QPushButton::clicked, pPage, fnClear);
+
+    pLayout->addLayout(pHeaderLayout);
     pLayout->addWidget(pHint);
     pLayout->addWidget(pSummary);
     pLayout->addWidget(pSecondarySummary);
@@ -83,7 +96,11 @@ QWidget* pCreateChartPage(
 }
 }
 
-AuthenticationMetricsView::AuthenticationMetricsView(QWidget* pParent)
+AuthenticationMetricsView::AuthenticationMetricsView(
+    QWidget* pParent,
+    const std::function<void()>& fnClearComputation,
+    const std::function<void()>& fnClearEnergy
+)
     : m_pComputationPage(nullptr),
       m_pEnergyPage(nullptr),
       m_pComputationSummary(nullptr),
@@ -108,7 +125,8 @@ AuthenticationMetricsView::AuthenticationMetricsView(QWidget* pParent)
         ),
         m_pComputationSummary,
         m_pHardwareSummary,
-        pComputationChart
+        pComputationChart,
+        fnClearComputation
     );
     configureSeries(m_pNativeVerifySeries, QStringLiteral("TESLA"));
     configureSeries(m_pFastVerifySeries, QStringLiteral("S-TESLA"));
@@ -138,7 +156,8 @@ AuthenticationMetricsView::AuthenticationMetricsView(QWidget* pParent)
         ),
         m_pEnergySummary,
         pEnergyModel,
-        pEnergyChart
+        pEnergyChart,
+        fnClearEnergy
     );
     pEnergyModel->setText(QStringLiteral(
         "固定模型：0.181 μJ/μs × 验证耗时 + 0.038504 μJ/B × 认证字段字节数"
@@ -176,21 +195,31 @@ QWidget* AuthenticationMetricsView::pEnergyPage() const noexcept
 }
 
 void AuthenticationMetricsView::setRecords(
-    const std::vector<tesla::metrics::AuthenticationMetricRecord>& vecRecords
+    const std::vector<tesla::metrics::AuthenticationMetricRecord>& vecComputationRecords,
+    const std::vector<tesla::metrics::AuthenticationMetricRecord>& vecEnergyRecords
+)
+{
+    updateChart(vecComputationRecords, false);
+    updateChart(vecEnergyRecords, true);
+}
+
+void AuthenticationMetricsView::updateChart(
+    const std::vector<tesla::metrics::AuthenticationMetricRecord>& vecRecords,
+    bool bEnergy
 )
 {
     using namespace tesla::metrics;
-    m_vecRecords = vecRecords;
 
-    for (QLineSeries* pSeries : {
-            m_pNativeVerifySeries,
-            m_pFastVerifySeries,
-            m_pNativeEnergySeries,
-            m_pFastEnergySeries
-        })
-    {
-        pSeries->clear();
-    }
+    QLineSeries* pNativeSeries = bEnergy
+        ? m_pNativeEnergySeries : m_pNativeVerifySeries;
+    QLineSeries* pFastSeries = bEnergy
+        ? m_pFastEnergySeries : m_pFastVerifySeries;
+    QValueAxis*  pXAxis = bEnergy ? m_pEnergyXAxis : m_pComputationXAxis;
+    QValueAxis*  pYAxis = bEnergy ? m_pEnergyYAxis : m_pComputationYAxis;
+    QLabel*      pSummary = bEnergy ? m_pEnergySummary : m_pComputationSummary;
+
+    pNativeSeries->clear();
+    pFastSeries->clear();
 
     const auto fnEligibleRoundCount = [&vecRecords](
         AuthenticationMetricMode modeAuthentication
@@ -229,8 +258,7 @@ void AuthenticationMetricsView::setRecords(
     std::size_t nImprovedRoundSeen = 0;
     qreal dNativeRoundX = 0.0;
     qreal dImprovedRoundX = 0.0;
-    qreal dMaximumVerifyTime = 0.0;
-    qreal dMaximumEnergy = 0.0;
+    qreal dMaximumValue = 0.0;
     const EstimatedEnergyMetricSummary* pLatestRound = nullptr;
 
     for (const AuthenticationMetricRecord& varRecord : vecRecords)
@@ -258,36 +286,32 @@ void AuthenticationMetricsView::setRecords(
         }
 
         qreal& dRoundX = bNative ? dNativeRoundX : dImprovedRoundX;
-        QLineSeries* pVerifySeries = bNative
-            ? m_pNativeVerifySeries
-            : m_pFastVerifySeries;
-        QLineSeries* pEnergySeries = bNative
-            ? m_pNativeEnergySeries
-            : m_pFastEnergySeries;
+        QLineSeries* pSeries = bNative ? pNativeSeries : pFastSeries;
 
         ++dRoundX;
         const qreal dVerifyTimeMicroseconds = static_cast<qreal>(
             pEnergy->u64VerifyTimeNanoseconds()
         ) / 1000.0;
-        const qreal dEnergyMilliJoule = pEnergy->dEstimatedEnergyMilliJoule();
+        const qreal dValue = bEnergy
+            ? pEnergy->dEstimatedEnergyMilliJoule()
+            : dVerifyTimeMicroseconds;
 
-        pVerifySeries->append(dRoundX, dVerifyTimeMicroseconds);
-        pEnergySeries->append(dRoundX, dEnergyMilliJoule);
-        dMaximumVerifyTime = std::max(
-            dMaximumVerifyTime,
-            dVerifyTimeMicroseconds
-        );
-        dMaximumEnergy = std::max(dMaximumEnergy, dEnergyMilliJoule);
+        pSeries->append(dRoundX, dValue);
+        dMaximumValue = std::max(dMaximumValue, dValue);
         pLatestRound = pEnergy;
     }
 
     if (pLatestRound == nullptr)
     {
-        m_pComputationSummary->setText(QStringLiteral("尚无正常认证轮次"));
-        m_pHardwareSummary->setText(QStringLiteral(
-            "逐次硬件计数保留在原始指标导出记录中"
-        ));
-        m_pEnergySummary->setText(QStringLiteral("尚无正常轮次能耗"));
+        pSummary->setText(bEnergy
+            ? QStringLiteral("尚无正常轮次能耗")
+            : QStringLiteral("尚无正常认证轮次"));
+        if (!bEnergy)
+        {
+            m_pHardwareSummary->setText(QStringLiteral(
+                "图表按正常认证轮次汇总"
+            ));
+        }
     }
     else
     {
@@ -298,50 +322,41 @@ void AuthenticationMetricsView::setRecords(
         const double dVerifyTimeMicroseconds = static_cast<double>(
             pLatestRound->u64VerifyTimeNanoseconds()
         ) / 1000.0;
-        const double dAveragePacketVerifyTimeMicroseconds =
-            dVerifyTimeMicroseconds
-            / static_cast<double>(pLatestRound->u32PacketCount());
 
-        m_pComputationSummary->setText(
-            QStringLiteral("最新正常%1轮次：累计验证耗时=%2 μs；平均每包=%3 μs")
-                .arg(strMode)
-                .arg(dVerifyTimeMicroseconds, 0, 'f', 3)
-                .arg(
-                    dAveragePacketVerifyTimeMicroseconds,
-                    0,
-                    'f',
-                    3
+        if (!bEnergy)
+        {
+            const double dAveragePacketVerifyTimeMicroseconds =
+                dVerifyTimeMicroseconds
+                / static_cast<double>(pLatestRound->u32PacketCount());
+
+            m_pComputationSummary->setText(
+                QStringLiteral("最新正常%1轮次：累计验证耗时=%2 μs；平均每包=%3 μs")
+                    .arg(strMode)
+                    .arg(dVerifyTimeMicroseconds, 0, 'f', 3)
+                    .arg(dAveragePacketVerifyTimeMicroseconds, 0, 'f', 3)
+            );
+            m_pHardwareSummary->setText(QStringLiteral(
+                "图表按正常认证轮次汇总"
+            ));
+        }
+        else
+        {
+            m_pEnergySummary->setText(
+                QStringLiteral(
+                    "最新正常%1轮次：能耗=%2 mJ；平均每包=%3 μJ；"
+                    "验证耗时=%4 μs；接收算法字段=%5B"
                 )
-        );
-        m_pHardwareSummary->setText(QStringLiteral(
-            "逐次硬件计数保留在原始指标导出记录中；图表按轮次汇总"
-        ));
-        m_pEnergySummary->setText(
-            QStringLiteral(
-                "最新正常%1轮次：能耗=%2 mJ；平均每包=%3 μJ；"
-                "验证耗时=%4 μs；接收算法字段=%5B"
-            )
-                .arg(strMode)
-                .arg(pLatestRound->dEstimatedEnergyMilliJoule(), 0, 'f', 6)
-                .arg(pLatestRound->dAveragePacketEnergyMicroJoule(), 0, 'f', 6)
-                .arg(dVerifyTimeMicroseconds, 0, 'f', 3)
-                .arg(pLatestRound->u64ReceivedAuthBytes())
-        );
+                    .arg(strMode)
+                    .arg(pLatestRound->dEstimatedEnergyMilliJoule(), 0, 'f', 6)
+                    .arg(pLatestRound->dAveragePacketEnergyMicroJoule(), 0, 'f', 6)
+                    .arg(dVerifyTimeMicroseconds, 0, 'f', 3)
+                    .arg(pLatestRound->u64ReceivedAuthBytes())
+            );
+        }
     }
 
     const qreal dMaximumRoundX = std::max(dNativeRoundX, dImprovedRoundX);
-    updateAxes(
-        m_pComputationXAxis,
-        m_pComputationYAxis,
-        dMaximumRoundX,
-        dMaximumVerifyTime
-    );
-    updateAxes(
-        m_pEnergyXAxis,
-        m_pEnergyYAxis,
-        dMaximumRoundX,
-        dMaximumEnergy
-    );
+    updateAxes(pXAxis, pYAxis, dMaximumRoundX, dMaximumValue);
 }
 
 void AuthenticationMetricsView::configureSeries(

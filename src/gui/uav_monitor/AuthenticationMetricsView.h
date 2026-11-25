@@ -4,6 +4,7 @@
 
 #include <QtGlobal>
 
+#include <functional>
 #include <vector>
 
 class QLabel;
@@ -16,15 +17,24 @@ class QWidget;
 class AuthenticationMetricsView final
 {
 public:
-    explicit AuthenticationMetricsView(QWidget* pParent);
+    AuthenticationMetricsView(
+        QWidget* pParent,
+        const std::function<void()>& fnClearComputation,
+        const std::function<void()>& fnClearEnergy
+    );
 
     QWidget* pComputationPage() const noexcept;
     QWidget* pEnergyPage() const noexcept;
     void setRecords(
-        const std::vector<tesla::metrics::AuthenticationMetricRecord>& vecRecords
+        const std::vector<tesla::metrics::AuthenticationMetricRecord>& vecComputationRecords,
+        const std::vector<tesla::metrics::AuthenticationMetricRecord>& vecEnergyRecords
     );
 
 private:
+    void updateChart(
+        const std::vector<tesla::metrics::AuthenticationMetricRecord>& vecRecords,
+        bool bEnergy
+    );
     static void configureSeries(QLineSeries* pSeries, const QString& strName);
     static void updateAxes(
         QValueAxis* pXAxis,
@@ -45,5 +55,4 @@ private:
     QValueAxis*  m_pComputationYAxis;
     QValueAxis*  m_pEnergyXAxis;
     QValueAxis*  m_pEnergyYAxis;
-    std::vector<tesla::metrics::AuthenticationMetricRecord> m_vecRecords;
 };

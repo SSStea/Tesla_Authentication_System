@@ -146,7 +146,8 @@ void UavMonitorNetworkController::connectToNode(
     m_pSocket->abort();
     m_decStream.reset();
     m_stoObservations.clear();
-    m_stoMetrics.clear();
+    m_stoComputationMetrics.clear();
+    m_stoEnergyMetrics.clear();
     emit authenticationObservationsChanged();
     emit authenticationMetricsChanged();
     m_strHostAddress = strHostAddress.trimmed();
@@ -245,9 +246,27 @@ UavMonitorNetworkController::vecDosSummarySnapshot() const
 }
 
 std::vector<tesla::metrics::AuthenticationMetricRecord>
-UavMonitorNetworkController::vecMetricSnapshot() const
+UavMonitorNetworkController::vecComputationMetricSnapshot() const
 {
-    return m_stoMetrics.vecSnapshot();
+    return m_stoComputationMetrics.vecSnapshot();
+}
+
+std::vector<tesla::metrics::AuthenticationMetricRecord>
+UavMonitorNetworkController::vecEnergyMetricSnapshot() const
+{
+    return m_stoEnergyMetrics.vecSnapshot();
+}
+
+void UavMonitorNetworkController::clearComputationMetrics()
+{
+    m_stoComputationMetrics.clear();
+    emit authenticationMetricsChanged();
+}
+
+void UavMonitorNetworkController::clearEnergyMetrics()
+{
+    m_stoEnergyMetrics.clear();
+    emit authenticationMetricsChanged();
 }
 
 void UavMonitorNetworkController::processTcpData()
@@ -488,7 +507,7 @@ void UavMonitorNetworkController::processTcpData()
             );
             for (const auto& varMetric : detSnapshot.vecRecords())
             {
-                m_stoMetrics.bAppend(varMetric);
+                appendMetric(varMetric);
             }
             scheduleMetricRefresh();
         }
@@ -538,8 +557,20 @@ void UavMonitorNetworkController::appendMetric(
     const tesla::metrics::AuthenticationMetricRecord& varMetric
 )
 {
-    m_stoMetrics.bAppend(varMetric);
-    scheduleMetricRefresh();
+    if (std::holds_alternative<
+            tesla::metrics::EstimatedEnergyMetricSummary
+        >(varMetric))
+    {
+        m_stoComputationMetrics.bAppend(varMetric);
+        m_stoEnergyMetrics.bAppend(varMetric);
+        scheduleMetricRefresh();
+    }
+    else if (std::holds_alternative<
+                 tesla::metrics::AuthenticationRoundArchiveSummary
+             >(varMetric))
+    {
+        emit metricArchiveReceived(varMetric);
+    }
 }
 
 void UavMonitorNetworkController::scheduleMetricRefresh()

@@ -37,6 +37,8 @@ public:
     void connectToNode(const QString& strHostAddress, std::uint16_t u16Port);
     void disconnectFromNode();
     void refreshStatus();
+    void clearComputationMetrics();
+    void clearEnergyMetrics();
 
     UavMonitorConnectionState stateConnection() const noexcept;
     const QString& strHostAddress() const noexcept;
@@ -53,7 +55,9 @@ public:
     std::vector<tesla::protocol::DosSummaryControlDetails>
         vecDosSummarySnapshot() const;
     std::vector<tesla::metrics::AuthenticationMetricRecord>
-        vecMetricSnapshot() const;
+        vecComputationMetricSnapshot() const;
+    std::vector<tesla::metrics::AuthenticationMetricRecord>
+        vecEnergyMetricSnapshot() const;
 
 signals:
     void stateChanged();
@@ -63,6 +67,9 @@ signals:
     void senderConfigurationReceived();
     void authenticationObservationsChanged();
     void authenticationMetricsChanged();
+    void metricArchiveReceived(
+        const tesla::metrics::AuthenticationMetricRecord& varMetric
+    );
 
 private:
     void processTcpData();
@@ -91,7 +98,8 @@ private:
     bool                      m_bReceiverRunning;
     qint64                    m_nLastResponseMilliseconds;
     tesla::core::AuthenticationObservationStore m_stoObservations;
-    tesla::metrics::AuthenticationMetricStore m_stoMetrics;
+    tesla::metrics::AuthenticationMetricStore m_stoComputationMetrics;
+    tesla::metrics::AuthenticationMetricStore m_stoEnergyMetrics;
     bool                      m_bObservationRefreshScheduled{false};
     bool                      m_bMetricRefreshScheduled{false};
 };

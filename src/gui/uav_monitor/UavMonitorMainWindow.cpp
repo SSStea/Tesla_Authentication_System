@@ -74,7 +74,17 @@ UavMonitorMainWindow::UavMonitorMainWindow(
         pTabs
     );
     pTabs->addTab(m_pAuthenticationMonitor, QStringLiteral("报文与展示"));
-    m_ptrMetricsView = std::make_unique<AuthenticationMetricsView>(pTabs);
+    m_ptrMetricsView = std::make_unique<AuthenticationMetricsView>(
+        pTabs,
+        [this]()
+        {
+            m_ctlNetwork.clearComputationMetrics();
+        },
+        [this]()
+        {
+            m_ctlNetwork.clearEnergyMetrics();
+        }
+    );
     pTabs->addTab(m_ptrMetricsView->pComputationPage(), QStringLiteral("计算开销"));
     pTabs->addTab(m_ptrMetricsView->pEnergyPage(), QStringLiteral("能耗"));
     pTabs->addTab(pCreateLogPage(), QStringLiteral("日志"));
@@ -113,6 +123,15 @@ UavMonitorMainWindow::UavMonitorMainWindow(
         &UavMonitorNetworkController::authenticationMetricsChanged,
         this,
         &UavMonitorMainWindow::refreshAuthenticationMetrics
+    );
+    connect(
+        &m_ctlNetwork,
+        &UavMonitorNetworkController::metricArchiveReceived,
+        this,
+        [this](const tesla::metrics::AuthenticationMetricRecord& varMetric)
+        {
+            m_pAuthenticationMonitor->setMetricSnapshots({varMetric});
+        }
     );
     refreshStatus();
     refreshAuthenticationViews();
@@ -238,10 +257,10 @@ void UavMonitorMainWindow::refreshAuthenticationViews()
 
 void UavMonitorMainWindow::refreshAuthenticationMetrics()
 {
-    const std::vector<tesla::metrics::AuthenticationMetricRecord> vecMetrics =
-        m_ctlNetwork.vecMetricSnapshot();
-    m_ptrMetricsView->setRecords(vecMetrics);
-    m_pAuthenticationMonitor->setMetricSnapshots(vecMetrics);
+    m_ptrMetricsView->setRecords(
+        m_ctlNetwork.vecComputationMetricSnapshot(),
+        m_ctlNetwork.vecEnergyMetricSnapshot()
+    );
 }
 
 void UavMonitorMainWindow::refreshStatus()

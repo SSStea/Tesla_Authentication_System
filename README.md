@@ -73,6 +73,8 @@ out/windows/Release/tesla_uav_monitor_gui.exe
 out/windows/Release/tesla_attack_test_gui.exe
 ```
 
+节点继续在 UDP `37020` 监听扫描请求。Manager 使用系统分配的独占临时 UDP 端口发送扫描，并在该端口接收公告和后续心跳，不再与同机 PC 节点或攻击测试端共用 `37020`。节点记录最近一次扫描来源的 IP 和端口，把周期心跳回送到该端点。Manager 重启后需要重新扫描以更新心跳目标。
+
 Qt 和 OpenSSL 的默认位置集中在 `projects/TeslaWindows.props`：
 
 ```xml

@@ -12,7 +12,7 @@
 
 namespace tesla::node_agent
 {
-/** @brief 接收UDP发现请求、单播返回节点公告并周期广播心跳。 */
+/** @brief 接收UDP发现请求，向扫描来源端点返回公告和周期心跳。 */
 class UdpDiscoveryService final
 {
 public:
@@ -54,6 +54,7 @@ private:
     std::uint16_t             m_u16DiscoveryPort;
     std::string               m_strBroadcastAddress;
     std::string               m_strManagerAddress;
+    std::uint16_t             m_u16ManagerPort{0};
     std::string               m_strNodeName;
     std::uint16_t             m_u16ManagementPort;
     std::chrono::milliseconds m_durHeartbeatInterval;

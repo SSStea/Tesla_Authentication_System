@@ -123,6 +123,8 @@ private:
     std::uint16_t m_u16MulticastPort;
     QString       m_strLocalIpv4Address;
     QString       m_strNodeName;
+    QHostAddress  m_adrManagerAddress;
+    std::uint16_t m_u16ManagerPort{0};
     QUdpSocket*   m_pDiscoverySocket;
     QUdpSocket*   m_pPresenceSocket;
     QUdpSocket*   m_pMulticastSocket;

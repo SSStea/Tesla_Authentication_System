@@ -398,6 +398,8 @@ bool PcNodeNetworkController::bStart()
 void PcNodeNetworkController::stop() noexcept
 {
     m_bRunning = false;
+    m_adrManagerAddress.clear();
+    m_u16ManagerPort = 0;
     m_pRoundDrainTimer->stop();
     m_strPendingRoundDrainId.clear();
     m_setReceivedRoundResultKeys.clear();
@@ -1454,6 +1456,8 @@ void PcNodeNetworkController::processDiscoveryDatagrams()
             continue;
         }
 
+        m_adrManagerAddress = adrSource;
+        m_u16ManagerPort = u16SourcePort;
         bSendPresence(
             NodeDiscoveryMessageType::NodeAnnouncement,
             QString::fromStdString(std::get<DiscoveryRequestDetails>(
@@ -1496,6 +1500,17 @@ void PcNodeNetworkController::sendHeartbeat()
 {
     if (!m_bRunning.load())
     {
+        return;
+    }
+
+    if (!m_adrManagerAddress.isNull())
+    {
+        bSendPresence(
+            NodeDiscoveryMessageType::Heartbeat,
+            QString(),
+            m_adrManagerAddress,
+            m_u16ManagerPort
+        );
         return;
     }
 

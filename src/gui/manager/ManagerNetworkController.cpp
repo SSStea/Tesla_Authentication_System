@@ -256,7 +256,6 @@ ManagerNetworkController::ManagerNetworkController(
       m_setDiscoveryScanPorts({u16DiscoveryPort}),
       m_durOfflineTimeout(durOfflineTimeout),
       m_pScanSocket(new QUdpSocket(this)),
-      m_pHeartbeatSocket(new QUdpSocket(this)),
       m_pOfflineTimer(new QTimer(this))
 {
     m_pOfflineTimer->setInterval(500);
@@ -268,15 +267,6 @@ ManagerNetworkController::ManagerNetworkController(
         [this]()
         {
             processPendingDiscoveryDatagrams(m_pScanSocket);
-        }
-    );
-    connect(
-        m_pHeartbeatSocket,
-        &QUdpSocket::readyRead,
-        this,
-        [this]()
-        {
-            processPendingDiscoveryDatagrams(m_pHeartbeatSocket);
         }
     );
     connect(
@@ -299,27 +289,17 @@ void ManagerNetworkController::start()
         return;
     }
 
+    // 扫描响应和周期心跳共用独占临时端口，不与同机节点的发现监听端口争用。
     const bool bScanBound = m_pScanSocket->bind(
         QHostAddress::AnyIPv4,
         0,
-        QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint
-    );
-    const bool bHeartbeatBound = m_pHeartbeatSocket->bind(
-        QHostAddress::AnyIPv4,
-        m_u16DiscoveryPort,
-        QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint
+        QUdpSocket::DontShareAddress
     );
 
     if (!bScanBound)
     {
         emit logMessage(QStringLiteral("节点扫描Socket绑定失败：")
             + m_pScanSocket->errorString());
-    }
-
-    if (!bHeartbeatBound)
-    {
-        emit logMessage(QStringLiteral("心跳监听端口绑定失败：")
-            + m_pHeartbeatSocket->errorString());
     }
 
     m_pOfflineTimer->start();
@@ -330,7 +310,6 @@ void ManagerNetworkController::stop() noexcept
     m_pOfflineTimer->stop();
     disconnectAll();
     m_pScanSocket->close();
-    m_pHeartbeatSocket->close();
 }
 
 void ManagerNetworkController::addDiscoveryScanPort(

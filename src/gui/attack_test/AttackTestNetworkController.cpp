@@ -230,6 +230,8 @@ bool AttackTestNetworkController::bStart()
 
 void AttackTestNetworkController::stop() noexcept
 {
+    m_adrManagerAddress.clear();
+    m_u16ManagerPort = 0;
     stopHighRateTraffic();
     m_pHeartbeatTimer->stop();
     m_pDiscoverySocket->close();
@@ -435,10 +437,14 @@ void AttackTestNetworkController::processDiscoveryDatagrams()
 
         const DiscoveryRequestDetails& detRequest =
             std::get<DiscoveryRequestDetails>(msgMessage.varDetails());
+        // 公告Socket绑定本地选定网卡；同机回环扫描也通过该本地地址回送。
+        m_adrManagerAddress = adrSource.isLoopback()
+            ? QHostAddress(m_strLocalIpv4Address) : adrSource;
+        m_u16ManagerPort = u16SourcePort;
         static_cast<void>(bSendPresence(
             NodeDiscoveryMessageType::NodeAnnouncement,
             QString::fromStdString(detRequest.strRequestId()),
-            adrSource,
+            m_adrManagerAddress,
             u16SourcePort
         ));
     }
@@ -541,6 +547,17 @@ void AttackTestNetworkController::sendHeartbeat()
 {
     if (!m_bRunning)
     {
+        return;
+    }
+
+    if (!m_adrManagerAddress.isNull())
+    {
+        static_cast<void>(bSendPresence(
+            NodeDiscoveryMessageType::Heartbeat,
+            QString(),
+            m_adrManagerAddress,
+            m_u16ManagerPort
+        ));
         return;
     }
 

@@ -147,7 +147,6 @@ private:
     QSet<std::uint16_t>       m_setDiscoveryScanPorts;
     std::chrono::milliseconds m_durOfflineTimeout;
     QUdpSocket*                m_pScanSocket;
-    QUdpSocket*                m_pHeartbeatSocket;
     QTimer*                    m_pOfflineTimer;
     QHash<QString, std::shared_ptr<EndpointState>> m_mapEndpoints;
 };

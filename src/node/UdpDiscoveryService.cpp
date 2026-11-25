@@ -137,6 +137,8 @@ void UdpDiscoveryService::stop() noexcept
     {
         m_thrWorker.join();
     }
+    m_strManagerAddress.clear();
+    m_u16ManagerPort = 0;
 }
 
 bool UdpDiscoveryService::bIsRunning() const noexcept
@@ -208,7 +210,8 @@ void UdpDiscoveryService::workerLoop()
                 protocol::NodeDiscoveryMessageType::Heartbeat,
                 "",
                 strHeartbeatTarget,
-                m_u16DiscoveryPort
+                m_strManagerAddress.empty()
+                    ? m_u16DiscoveryPort : m_u16ManagerPort
             );
             tpNextHeartbeat = std::chrono::steady_clock::now() + m_durHeartbeatInterval;
         }
@@ -239,6 +242,7 @@ void UdpDiscoveryService::handleDatagram(
         msgMessage.varDetails()
     ).strRequestId();
     m_strManagerAddress = strSourceAddress;
+    m_u16ManagerPort = u16SourcePort;
     bSendPresence(
         protocol::NodeDiscoveryMessageType::NodeAnnouncement,
         strRequestId,

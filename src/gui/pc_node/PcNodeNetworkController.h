@@ -125,6 +125,8 @@ private:
     std::chrono::milliseconds m_durHeartbeatInterval;
     QString      m_strNodeName;
     QHostAddress m_adrLocalAddress;
+    QHostAddress  m_adrManagerAddress;
+    std::uint16_t m_u16ManagerPort{0};
     int          m_nLocalInterfaceIndex;
     QUdpSocket*  m_pDiscoverySocket;
     QUdpSocket*  m_pAuthenticationSocket;

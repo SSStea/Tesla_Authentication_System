@@ -39,6 +39,7 @@ const QHostAddress AUTHENTICATION_MULTICAST_ADDRESS(
 constexpr std::uint16_t AUTHENTICATION_MULTICAST_PORT = 39020;
 constexpr std::size_t MAX_AUTHENTICATION_SEND_QUEUE_SIZE = 8192;
 constexpr std::size_t MAX_AUTHENTICATION_SEND_BATCH_SIZE = 256;
+constexpr int ROUND_DRAIN_POLL_INTERVAL_MILLISECONDS = 25;
 
 bool bIsPrivateIpv4(const QHostAddress& adrAddress)
 {
@@ -194,6 +195,7 @@ PcNodeNetworkController::PcNodeNetworkController(
       m_pAuthenticationSocket(new QUdpSocket(this)),
       m_pManagementServer(new QTcpServer(this)),
       m_pHeartbeatTimer(new QTimer(this)),
+      m_pRoundDrainTimer(new QTimer(this)),
       m_bRunning(false),
       m_bReceiverRunning(false),
       m_bAuthenticationSendDrainScheduled(false),
@@ -286,6 +288,7 @@ PcNodeNetworkController::PcNodeNetworkController(
     m_pHeartbeatTimer->setInterval(
         static_cast<int>(m_durHeartbeatInterval.count())
     );
+    m_pRoundDrainTimer->setInterval(ROUND_DRAIN_POLL_INTERVAL_MILLISECONDS);
 
     connect(
         m_pDiscoverySocket,
@@ -310,6 +313,12 @@ PcNodeNetworkController::PcNodeNetworkController(
         &QTimer::timeout,
         this,
         &PcNodeNetworkController::sendHeartbeat
+    );
+    connect(
+        m_pRoundDrainTimer,
+        &QTimer::timeout,
+        this,
+        &PcNodeNetworkController::checkRoundDrain
     );
 }
 
@@ -389,6 +398,10 @@ bool PcNodeNetworkController::bStart()
 void PcNodeNetworkController::stop() noexcept
 {
     m_bRunning = false;
+    m_pRoundDrainTimer->stop();
+    m_strPendingRoundDrainId.clear();
+    m_setReceivedRoundResultKeys.clear();
+    m_nExpectedRoundResultCount = 0;
 
     {
         std::lock_guard<std::mutex> lckQueue(m_mtxAuthenticationSendQueue);
@@ -911,6 +924,25 @@ bool PcNodeNetworkController::bHandleJson(
                 ptrClient->roleClient,
                 msgMessage
             );
+        if (msgMessage.typeMessage() == NodeControlMessageType::RoundStart)
+        {
+            const auto& detAck = std::get<
+                AuthenticationRoundAcknowledgementControlDetails
+            >(msgResponse.varDetails());
+            if (detAck.bAccepted())
+            {
+                m_pRoundDrainTimer->stop();
+                m_strPendingRoundDrainId = QString::fromStdString(
+                    detAck.strRoundId()
+                );
+                m_setReceivedRoundResultKeys.clear();
+                // Receiver运行标志可能先于最终结果回调结束，排空前还须收齐本地结果。
+                m_nExpectedRoundResultCount =
+                    m_ptrAuthenticationRuntime->nReceiverContextCount()
+                    + (m_ptrAuthenticationRuntime->bHasSenderContext() ? 1U : 0U);
+            }
+        }
+
         const bool bSent = bSendNodeControl(ptrClient, msgResponse);
         emit stateChanged();
         sendHeartbeat();
@@ -1139,6 +1171,19 @@ void PcNodeNetworkController::processAuthenticationRuntimeEvent(
             )));
         // 最终结果到达前逐轮归档已写入运行时指标存储，通知界面刷新导出快照。
         emit authenticationObservationsChanged();
+
+        if (QString::fromStdString(detResult.strRoundId())
+            == m_strPendingRoundDrainId)
+        {
+            m_setReceivedRoundResultKeys.insert(QStringLiteral("%1/%2/%3")
+                .arg(static_cast<int>(detResult.roleResult()))
+                .arg(QString::fromStdString(detResult.strSenderId()))
+                .arg(detResult.u64ChainId()));
+            if (!m_pRoundDrainTimer->isActive())
+            {
+                m_pRoundDrainTimer->start();
+            }
+        }
     }
     emit stateChanged();
 }
@@ -1239,6 +1284,59 @@ void PcNodeNetworkController::drainAuthenticationSendQueue()
             &PcNodeNetworkController::drainAuthenticationSendQueue,
             Qt::QueuedConnection
         );
+    }
+}
+
+void PcNodeNetworkController::checkRoundDrain()
+{
+    // PC指标已同步归档，只需等待本轮结果、Qt刷新通知和网络写出完成。
+    if (m_setReceivedRoundResultKeys.size()
+            < static_cast<qsizetype>(m_nExpectedRoundResultCount)
+        || m_ptrAuthenticationRuntime->bSenderRunning()
+        || m_ptrAuthenticationRuntime->bReceiverRoundRunning()
+        || m_bObservationRefreshScheduled.load()
+        || m_bKeyChainRefreshScheduled.load())
+    {
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lckQueue(m_mtxAuthenticationSendQueue);
+        if (m_bAuthenticationSendDrainScheduled
+            || !m_deqAuthenticationSendQueue.empty())
+        {
+            return;
+        }
+    }
+
+    const QList<std::shared_ptr<ClientState>> listClients =
+        m_mapClients.values();
+    for (const std::shared_ptr<ClientState>& ptrClient : listClients)
+    {
+        if (ptrClient->bHelloReceived
+            && ptrClient->pSocket->state() == QAbstractSocket::ConnectedState
+            && ptrClient->pSocket->bytesToWrite() > 0)
+        {
+            return;
+        }
+    }
+
+    const NodeControlMessage msgAck(
+        AuthenticationRoundDrainAcknowledgementControlDetails(
+            m_strPendingRoundDrainId.toStdString(),
+            m_strNodeName.toStdString()
+        )
+    );
+    m_pRoundDrainTimer->stop();
+    m_strPendingRoundDrainId.clear();
+
+    for (const std::shared_ptr<ClientState>& ptrClient : listClients)
+    {
+        if (ptrClient->bHelloReceived
+            && ptrClient->roleClient == TcpClientRole::Manager)
+        {
+            bSendNodeControl(ptrClient, msgAck);
+        }
     }
 }
 

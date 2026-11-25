@@ -8,6 +8,7 @@
 #include <QHostAddress>
 #include <QHash>
 #include <QObject>
+#include <QSet>
 #include <QString>
 
 #include <chrono>
@@ -104,6 +105,7 @@ private:
         const tesla::protocol::ByteBuffer& vecDatagram
     );
     void drainAuthenticationSendQueue();
+    void checkRoundDrain();
     void processAuthenticationDatagrams();
     tesla::core::TimeSynchronizationStatus stsQueryTimeSynchronization() const;
     void processDiscoveryDatagrams();
@@ -128,6 +130,10 @@ private:
     QUdpSocket*  m_pAuthenticationSocket;
     QTcpServer*  m_pManagementServer;
     QTimer*      m_pHeartbeatTimer;
+    QTimer*       m_pRoundDrainTimer;
+    QString       m_strPendingRoundDrainId;
+    QSet<QString> m_setReceivedRoundResultKeys;
+    std::size_t   m_nExpectedRoundResultCount{0};
     std::atomic<bool> m_bRunning;
     bool         m_bReceiverRunning;
     bool         m_bAuthenticationSendDrainScheduled;

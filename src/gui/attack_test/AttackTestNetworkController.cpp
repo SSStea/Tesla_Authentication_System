@@ -437,8 +437,10 @@ void AttackTestNetworkController::processDiscoveryDatagrams()
 
         const DiscoveryRequestDetails& detRequest =
             std::get<DiscoveryRequestDetails>(msgMessage.varDetails());
-        // 公告Socket绑定本地选定网卡；同机回环扫描也通过该本地地址回送。
-        m_adrManagerAddress = adrSource.isLoopback()
+        // 公告Socket绑定选定网卡；同机Manager的其他网卡地址也统一从该网卡回送。
+        const bool bLocalManager = adrSource.isLoopback()
+            || QNetworkInterface::allAddresses().contains(adrSource);
+        m_adrManagerAddress = bLocalManager
             ? QHostAddress(m_strLocalIpv4Address) : adrSource;
         m_u16ManagerPort = u16SourcePort;
         static_cast<void>(bSendPresence(

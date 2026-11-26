@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 class QTimer;
 class QUdpSocket;
@@ -101,6 +102,9 @@ public:
         const QString& strIpAddress,
         const QString& strRoundId
     );
+    void setMessageDisplayContexts(
+        std::vector<tesla::protocol::MessageDisplayContextDetails> vecContexts
+    );
     /** @brief 在现有MANAGER连接上按64KiB分块并受背压约束地上传完整文件。 */
     bool bQueueFileUpload(
         const QString& strEndpointKey,
@@ -149,4 +153,5 @@ private:
     QUdpSocket*                m_pScanSocket;
     QTimer*                    m_pOfflineTimer;
     QHash<QString, std::shared_ptr<EndpointState>> m_mapEndpoints;
+    std::vector<tesla::protocol::MessageDisplayContextDetails> m_vecMessageDisplayContexts;
 };

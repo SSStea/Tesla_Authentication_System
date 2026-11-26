@@ -1203,6 +1203,15 @@ private:
         const protocol::UdpAuthenticationPacket& udpPacket = std::get<
             protocol::UdpAuthenticationPacket
         >(resPacket);
+        std::uint32_t u32MessageByteCount = protocol::BINARY_BLOCK_SIZE;
+        if (const auto* pText = std::get_if<workload::TextWorkload>(
+                &m_optPayloadWorkload.value()
+            ))
+        {
+            u32MessageByteCount = static_cast<std::uint32_t>(
+                pText->pldPayload().strUtf8Text().size()
+            );
+        }
         std::uint32_t u32IntervalIndex = 0;
         std::uint32_t u32PacketIndex = 0;
         if (udpPacket.bIsDataPacket())
@@ -1212,6 +1221,14 @@ private:
             >(udpPacket.varDetails());
             u32IntervalIndex = udpData.u32IntervalIndex();
             u32PacketIndex = udpData.u32PacketIndex();
+            if (const auto* pFile = std::get_if<workload::FileWorkload>(
+                    &m_optPayloadWorkload.value()
+                ))
+            {
+                u32MessageByteCount = protocol::u32FileMessageByteCount(
+                    pFile->u64OriginalByteCount(), u32PacketIndex
+                );
+            }
         }
         else
         {
@@ -1251,7 +1268,7 @@ private:
                     1,
                     strReason,
                     AuthenticationObservationFactory::varPayloadDetails(
-                        udpPacket
+                        udpPacket, u32MessageByteCount
                     ),
                     vecDatagram
             )

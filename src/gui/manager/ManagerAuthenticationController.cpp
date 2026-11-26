@@ -511,7 +511,8 @@ bool ManagerAuthenticationController::bPrepareTextRound(
                     arrBlock(matMaterial.digCommitmentKey()),
                     prmControlParameters(matMaterial.prmRoundParameters()),
                     tesla::protocol::TextReceiverPayloadControlDetails(
-                        cfgRound.u32TextRepeatCount()
+                        cfgRound.u32TextRepeatCount(),
+                        static_cast<std::uint32_t>(cfgRound.strText().toUtf8().size())
                     )
                 );
             }
@@ -555,6 +556,19 @@ bool ManagerAuthenticationController::bPrepareTextRound(
             m_nExpectedResultCount += vecReceiverContexts.size();
         }
         m_nExpectedResultCount += m_vecSenderTargets.size();
+
+        std::vector<tesla::protocol::MessageDisplayContextDetails> vecDisplayContexts;
+        for (const SenderTarget& tgtSender : m_vecSenderTargets)
+        {
+            vecDisplayContexts.emplace_back(
+                tgtSender.strIpAddress.toStdString(),
+                tgtSender.matMaterial.u64ChainId(),
+                false,
+                static_cast<std::uint64_t>(cfgRound.strText().toUtf8().size()),
+                cfgRound.u32TextRepeatCount()
+            );
+        }
+        m_ctlNetwork.setMessageDisplayContexts(std::move(vecDisplayContexts));
 
         if (optAttackIp.has_value())
         {
@@ -796,6 +810,19 @@ bool ManagerAuthenticationController::bPrepareFileRound(
                 m_strRoundId
             ));
         }
+
+        std::vector<tesla::protocol::MessageDisplayContextDetails> vecDisplayContexts;
+        for (const SenderTarget& tgtSender : m_vecSenderTargets)
+        {
+            vecDisplayContexts.emplace_back(
+                tgtSender.strIpAddress.toStdString(),
+                tgtSender.matMaterial.u64ChainId(),
+                true,
+                u64OriginalByteCount,
+                u32PacketCount
+            );
+        }
+        m_ctlNetwork.setMessageDisplayContexts(std::move(vecDisplayContexts));
 
         emit configurationStateChanged(
             false,
@@ -1610,6 +1637,7 @@ void ManagerAuthenticationController::completeRoundIfReady()
 
 void ManagerAuthenticationController::resetPreparedRound()
 {
+    m_ctlNetwork.setMessageDisplayContexts({});
     m_vecSenderTargets.clear();
     m_setParticipantEndpoints.clear();
     m_setPendingConfigurationRequests.clear();

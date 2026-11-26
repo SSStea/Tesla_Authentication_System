@@ -1,4 +1,5 @@
 #include "AttackTestMainWindow.h"
+#include "gui/shared/MessageDisplay.h"
 
 #include <QAbstractItemView>
 #include <QApplication>
@@ -12,6 +13,8 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QSignalBlocker>
+#include <QStyledItemDelegate>
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -21,6 +24,57 @@
 
 namespace
 {
+class MessageEditDelegate final : public QStyledItemDelegate
+{
+public:
+    explicit MessageEditDelegate(QObject* pParent)
+        : QStyledItemDelegate(pParent)
+    {
+    }
+
+    void setEditorData(QWidget* pEditor, const QModelIndex& idxMessage) const override
+    {
+        // 编辑始终使用完整32B，不从折叠后的显示字符串重建报文。
+        qobject_cast<QLineEdit*>(pEditor)->setText(
+            idxMessage.data(Qt::UserRole).toString()
+        );
+    }
+
+    void setModelData(
+        QWidget* pEditor,
+        QAbstractItemModel* pModel,
+        const QModelIndex& idxMessage
+    ) const override
+    {
+        const QString strFullHex = qobject_cast<QLineEdit*>(pEditor)
+            ->text().trimmed().toUpper();
+        const QByteArray arrMessage = QByteArray::fromHex(strFullHex.toLatin1());
+        const qsizetype nDisplayByteCount = tesla::gui::nMessageDisplayByteCount(
+            arrMessage, idxMessage.data(Qt::UserRole + 1).toUInt()
+        );
+        const QString strToolTip =
+            nDisplayByteCount == arrMessage.size()
+                && idxMessage.data(Qt::UserRole + 1).toUInt() < arrMessage.size()
+            ? QStringLiteral("填充区存在非零字节，已展开完整Message：%1").arg(strFullHex)
+            : strFullHex;
+        {
+            const QSignalBlocker blkModel(pModel);
+            pModel->setData(idxMessage, strFullHex, Qt::UserRole);
+            pModel->setData(idxMessage, strToolTip, Qt::ToolTipRole);
+        }
+        // 非法编辑保留原输入，让发送入口给出错误，避免fromHex忽略非法字符。
+        const bool bValidHex = strFullHex.size() == 64
+            && QString::fromLatin1(arrMessage.toHex()).compare(
+                strFullHex, Qt::CaseInsensitive
+            ) == 0;
+        pModel->setData(
+            idxMessage,
+            bValidHex ? strFullHex.left(nDisplayByteCount * 2) : strFullHex,
+            Qt::EditRole
+        );
+    }
+};
+
 QTableWidgetItem* pReadOnlyItem(const QString& strText)
 {
     QTableWidgetItem* pItem = new QTableWidgetItem(strText);
@@ -146,7 +200,7 @@ QWidget* AttackTestMainWindow::pCreateDatagramPage()
 
     QLabel* pHintLabel = new QLabel(
         QStringLiteral(
-            "篡改允许直接修改所选Message中的一位或多位；"
+            "篡改模式双击Message编辑完整32B；已知的尾部补零仅在显示时隐藏；"
             "重放会原样广播所选数据报。"
         ),
         pPage
@@ -155,6 +209,7 @@ QWidget* AttackTestMainWindow::pCreateDatagramPage()
     pLayout->addWidget(pHintLabel);
 
     m_pDatagramTable = new QTableWidget(0, 3, pPage);
+    m_pDatagramTable->setItemDelegateForColumn(2, new MessageEditDelegate(m_pDatagramTable));
     m_pDatagramTable->setHorizontalHeaderLabels({
         QStringLiteral("时间"),
         QStringLiteral("Sender"),
@@ -202,7 +257,7 @@ QWidget* AttackTestMainWindow::pCreateDatagramPage()
             );
             m_mapEditedMessages.insert(
                 pTimeItem->data(Qt::UserRole).toULongLong(),
-                pItem->text().trimmed().toUpper()
+                pItem->data(Qt::UserRole).toString()
             );
 
             if (m_bRecordRefreshPending)
@@ -344,7 +399,27 @@ void AttackTestMainWindow::refreshRecords()
         const QString strMessage = m_mapEditedMessages.contains(u64RecordId)
             ? m_mapEditedMessages.value(u64RecordId)
             : recDatagram.strMessageHex();
-        QTableWidgetItem* pMessageItem = new QTableWidgetItem(strMessage);
+        const QByteArray arrMessage = QByteArray::fromHex(strMessage.toLatin1());
+        const qsizetype nDisplayByteCount = tesla::gui::nMessageDisplayByteCount(
+            arrMessage, recDatagram.u32MessageByteCount()
+        );
+        const bool bValidHex = strMessage.size() == 64
+            && QString::fromLatin1(arrMessage.toHex()).compare(
+                strMessage, Qt::CaseInsensitive
+            ) == 0;
+        QTableWidgetItem* pMessageItem = new QTableWidgetItem(
+            bValidHex ? strMessage.left(nDisplayByteCount * 2) : strMessage
+        );
+        pMessageItem->setData(Qt::UserRole, strMessage);
+        pMessageItem->setData(Qt::UserRole + 1, recDatagram.u32MessageByteCount());
+        pMessageItem->setToolTip(
+            nDisplayByteCount < arrMessage.size()
+                ? QStringLiteral("已隐藏%1B尾部补零；完整Message：%2")
+                    .arg(arrMessage.size() - nDisplayByteCount).arg(strMessage)
+                : recDatagram.u32MessageByteCount() < arrMessage.size()
+                    ? QStringLiteral("填充区存在非零字节，已展开完整Message：%1").arg(strMessage)
+                    : strMessage
+        );
         if (!m_pMessageConflictButton->isChecked())
         {
             pMessageItem->setFlags(
@@ -388,7 +463,7 @@ void AttackTestMainWindow::broadcastSelected()
     if (m_pMessageConflictButton->isChecked())
     {
         const QString strMessage = m_pDatagramTable->item(nRow, 2)
-            ->text().trimmed().toUpper();
+            ->data(Qt::UserRole).toString();
         bSent = m_ctlNetwork.bBroadcastMessageConflict(
             u64RecordId,
             strMessage,

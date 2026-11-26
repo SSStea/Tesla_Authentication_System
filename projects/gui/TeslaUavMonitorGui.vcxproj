@@ -27,6 +27,7 @@
     <ClInclude Include="$(TeslaSourceRoot)gui\uav_monitor\AuthenticationMetricsView.h" />
     <ClInclude Include="$(TeslaSourceRoot)gui\shared\AuthenticationDisplayText.h" />
     <ClInclude Include="$(TeslaSourceRoot)gui\shared\AuthenticationMonitorWidget.h" />
+    <ClInclude Include="$(TeslaSourceRoot)gui\shared\MessageDisplay.h" />
     <ClCompile Include="$(TeslaSourceRoot)gui\uav_monitor\*.cpp" />
     <ClCompile Include="$(TeslaSourceRoot)gui\shared\AuthenticationMonitorWidget.cpp" />
     <ResourceCompile Include="$(TeslaSourceRoot)gui\resources\ApplicationUav.rc" />

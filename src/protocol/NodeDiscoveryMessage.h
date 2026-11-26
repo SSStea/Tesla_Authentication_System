@@ -20,7 +20,8 @@ enum class NodeDiscoveryMessageType
     DiscoverRequest,
     NodeAnnouncement,
     Heartbeat,
-    ObservationDisplayReset
+    ObservationDisplayReset,
+    MessageDisplayContext
 };
 
 /** @brief 扫描端发出的发现请求，只携带用于关联响应的请求ID。 */
@@ -82,9 +83,40 @@ private:
     std::uint64_t            m_u64TimestampMilliseconds;
 };
 
+/** @brief Manager通过心跳响应提供的公开展示信息，不参与UDP解析或认证。 */
+class MessageDisplayContextDetails final
+{
+public:
+    MessageDisplayContextDetails(
+        std::string strSenderIp,
+        std::uint64_t u64ChainId,
+        bool bFilePayload,
+        std::uint64_t u64PayloadByteCount,
+        std::uint32_t u32PacketCount,
+        std::string strRequestId = {}
+    );
+
+    const std::string& strSenderIp() const noexcept;
+    std::uint64_t u64ChainId() const noexcept;
+    bool bFilePayload() const noexcept;
+    std::uint64_t u64PayloadByteCount() const noexcept;
+    std::uint32_t u32PacketCount() const noexcept;
+    const std::string& strRequestId() const noexcept;
+    std::uint32_t u32MessageByteCount(std::uint32_t u32PacketIndex) const noexcept;
+
+private:
+    std::string   m_strSenderIp;
+    std::uint64_t m_u64ChainId;
+    bool          m_bFilePayload;
+    std::uint64_t m_u64PayloadByteCount;
+    std::uint32_t m_u32PacketCount;
+    std::string   m_strRequestId;
+};
+
 using NodeDiscoveryMessageDetails = std::variant<
     DiscoveryRequestDetails,
     ObservationDisplayResetDetails,
+    MessageDisplayContextDetails,
     NodePresenceDetails
 >;
 

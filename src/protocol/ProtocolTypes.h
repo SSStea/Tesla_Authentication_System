@@ -15,6 +15,12 @@ using ByteBuffer = std::vector<std::uint8_t>;
 constexpr std::size_t BINARY_BLOCK_SIZE = 32;
 using BinaryBlock = std::array<std::uint8_t, BINARY_BLOCK_SIZE>;
 
+/// 根据原文件长度计算Message有效字节数；披露包或范围外索引保持完整显示。
+std::uint32_t u32FileMessageByteCount(
+    std::uint64_t u64OriginalByteCount,
+    std::uint32_t u32PacketIndex
+) noexcept;
+
 /** @brief 协议输入在进入业务或密码计算前可能产生的结构化错误类型。 */
 enum class ProtocolDecodeErrorCode
 {

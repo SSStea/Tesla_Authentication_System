@@ -812,6 +812,15 @@ private:
 
         const AuthenticationRoundParameters& prmRound =
             staReceiver.ctxContext.prmRoundParameters();
+        const ReceiverPayloadDetails& varPayload =
+            staReceiver.ctxContext.varPayloadDetails();
+        const std::uint32_t u32MessageByteCount =
+            std::holds_alternative<TextReceiverPayloadDetails>(varPayload)
+            ? std::get<TextReceiverPayloadDetails>(varPayload).u32MessageByteCount()
+            : protocol::u32FileMessageByteCount(
+                std::get<FileReceiverPayloadDetails>(varPayload).u64OriginalByteCount(),
+                u32PacketIndex
+            );
         if (strActualSourceIp.empty())
         {
             strActualSourceIp = staReceiver.ctxContext.strSenderIpAddress();
@@ -844,7 +853,9 @@ private:
                 ),
                 u32DuplicateCount,
                 std::move(strReason),
-                AuthenticationObservationFactory::varPayloadDetails(udpPacket),
+                AuthenticationObservationFactory::varPayloadDetails(
+                    udpPacket, u32MessageByteCount
+                ),
                 vecRawDatagram
             )
         );

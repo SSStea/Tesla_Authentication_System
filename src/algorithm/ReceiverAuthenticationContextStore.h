@@ -14,16 +14,21 @@
 
 namespace tesla::core
 {
-/** @brief 文本Receiver公开上下文中的预期重复次数。 */
+/** @brief 文本Receiver的重复次数和仅用于展示的UTF-8字节长度。 */
 class TextReceiverPayloadDetails final
 {
 public:
-    explicit TextReceiverPayloadDetails(std::uint32_t u32RepeatCount);
+    explicit TextReceiverPayloadDetails(
+        std::uint32_t u32RepeatCount,
+        std::uint32_t u32MessageByteCount = 32U
+    );
 
     std::uint32_t u32RepeatCount() const noexcept;
+    std::uint32_t u32MessageByteCount() const noexcept;
 
 private:
     std::uint32_t m_u32RepeatCount;
+    std::uint32_t m_u32MessageByteCount;
 };
 
 /** @brief 文件Receiver公开上下文中的原始长度，不包含原文件Hash。 */

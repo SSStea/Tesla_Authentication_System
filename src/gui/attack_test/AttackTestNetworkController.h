@@ -11,6 +11,7 @@
 #include <QVector>
 
 #include <cstdint>
+#include <map>
 
 class QTimer;
 class QUdpSocket;
@@ -36,6 +37,8 @@ public:
     std::uint32_t u32OriginalPacketIndex() const noexcept;
     const QByteArray& arrDatagram() const noexcept;
     QString strMessageHex() const;
+    std::uint32_t u32MessageByteCount() const noexcept;
+    void setMessageByteCount(std::uint32_t u32MessageByteCount) noexcept;
 
 private:
     std::uint64_t m_u64RecordId;
@@ -45,6 +48,7 @@ private:
     std::uint32_t m_u32OriginalIntervalIndex;
     std::uint32_t m_u32OriginalPacketIndex;
     QByteArray    m_arrDatagram;
+    std::uint32_t m_u32MessageByteCount{32U};
 };
 
 /** @brief 独立完成组播监听、报文副本广播和后台节点发现。 */
@@ -101,6 +105,7 @@ signals:
 
 private:
     void processDiscoveryDatagrams();
+    void processDisplayContextDatagrams();
     void processMulticastDatagrams();
     void sendHeartbeat();
     void sendHighRateBatch();
@@ -125,6 +130,7 @@ private:
     QString       m_strNodeName;
     QHostAddress  m_adrManagerAddress;
     std::uint16_t m_u16ManagerPort{0};
+    QString       m_strDisplayRequestId;
     QUdpSocket*   m_pDiscoverySocket;
     QUdpSocket*   m_pPresenceSocket;
     QUdpSocket*   m_pMulticastSocket;
@@ -132,6 +138,10 @@ private:
     QTimer*       m_pHeartbeatTimer;
     QTimer*       m_pHighRateTimer;
     QVector<AttackDatagramRecord> m_vecRecords;
+    std::map<
+        std::pair<std::string, std::uint64_t>,
+        tesla::protocol::MessageDisplayContextDetails
+    > m_mapDisplayContexts;
     QSet<qulonglong> m_setCurrentRoundChainIds;
     QString       m_strCurrentRoundId;
     std::uint64_t m_u64NextRecordId;

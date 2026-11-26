@@ -77,6 +77,10 @@ out/windows/Release/tesla_attack_test_gui.exe
 
 Manager 对已连接节点每秒发送一次 TCP 状态查询，使用独立的单调计时器判断 TCP 响应是否超时（默认 3 秒）。UDP 心跳缺失不关闭正常的 TCP 连接，UDP 心跳持续到达也不能掩盖 TCP 无响应。更新此机制时，应同步重新生成并更新 Manager、PC 节点、攻击测试端和 Linux NodeAgent；发现 JSON 格式及公共函数接口保持不变。
 
+PC 节点端和无人机监控端的“报文与展示”详情，以及攻击测试端的“报文监听”Message 列，按载荷有效长度隐藏尾部补零。文本长度按 UTF-8 字节数下发；文件按原文件大小计算每包有效长度，文件内容本身的尾部零字节仍然显示。长度信息缺失时显示完整 32B；预期填充区域出现非零字节时展开完整 Message 并提示异常。
+
+该展示调整不改变认证 UDP 格式、MAC 输入和原始报文字节。TCP 配置及监控 JSON 增加可选 `messageByteCount` 字段，旧消息缺少字段时按 32B 展示。攻击端通过心跳响应接收 `MESSAGE_DISPLAY_CONTEXT`，按 Sender IP 和 chainId 关联，通知丢失或中途加入后可在后续心跳中补齐；Manager 重启后需重新扫描并下发轮次配置。攻击端双击 Message 时编辑完整 64 个十六进制字符，篡改和重放继续使用完整报文。使用新功能时应同步更新 Manager、PC 节点、无人机监控端、攻击端和 Linux NodeAgent。
+
 Qt 和 OpenSSL 的默认位置集中在 `projects/TeslaWindows.props`：
 
 ```xml

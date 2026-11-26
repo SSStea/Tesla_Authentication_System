@@ -31,7 +31,8 @@ std::string AuthenticationObservationFactory::strCandidateHash(
 
 protocol::PacketPayloadObservationDetails
 AuthenticationObservationFactory::varPayloadDetails(
-    const protocol::UdpAuthenticationPacket& udpPacket
+    const protocol::UdpAuthenticationPacket& udpPacket,
+    std::uint32_t u32MessageByteCount
 )
 {
     if (!udpPacket.bIsDataPacket())
@@ -80,7 +81,8 @@ AuthenticationObservationFactory::varPayloadDetails(
     return protocol::DataPacketObservationDetails(
         udpData.arrMessage(),
         udpData.optDisclosedKey(),
-        std::move(varModeDetails)
+        std::move(varModeDetails),
+        u32MessageByteCount
     );
 }
 

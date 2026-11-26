@@ -1,6 +1,7 @@
 #include "algorithm/ReceiverAuthenticationContextStore.h"
 
 #include "workload/FileWorkload.h"
+#include "workload/TextWorkload.h"
 
 #include <stdexcept>
 #include <utility>
@@ -8,19 +9,31 @@
 namespace tesla::core
 {
 TextReceiverPayloadDetails::TextReceiverPayloadDetails(
-    std::uint32_t u32RepeatCount
+    std::uint32_t u32RepeatCount,
+    std::uint32_t u32MessageByteCount
 )
-    : m_u32RepeatCount(u32RepeatCount)
+    : m_u32RepeatCount(u32RepeatCount),
+      m_u32MessageByteCount(u32MessageByteCount)
 {
     if (m_u32RepeatCount == 0)
     {
         throw std::invalid_argument("Text Receiver repeat count must be positive");
+    }
+    if (m_u32MessageByteCount == 0
+        || m_u32MessageByteCount > workload::TextPayload::MESSAGE_SIZE)
+    {
+        throw std::invalid_argument("Text Message byte count must be between 1 and 32");
     }
 }
 
 std::uint32_t TextReceiverPayloadDetails::u32RepeatCount() const noexcept
 {
     return m_u32RepeatCount;
+}
+
+std::uint32_t TextReceiverPayloadDetails::u32MessageByteCount() const noexcept
+{
+    return m_u32MessageByteCount;
 }
 
 FileReceiverPayloadDetails::FileReceiverPayloadDetails(

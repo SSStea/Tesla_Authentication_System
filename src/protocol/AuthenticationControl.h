@@ -127,16 +127,21 @@ private:
     AuthenticationRoundControlParameters  m_prmRoundParameters;
 };
 
-/** @brief 文本Receiver只需要预期的重复报文数量。 */
+/** @brief 文本Receiver的重复次数和仅用于展示的UTF-8字节长度。 */
 class TextReceiverPayloadControlDetails final
 {
 public:
-    explicit TextReceiverPayloadControlDetails(std::uint32_t u32RepeatCount);
+    explicit TextReceiverPayloadControlDetails(
+        std::uint32_t u32RepeatCount,
+        std::uint32_t u32MessageByteCount = BINARY_BLOCK_SIZE
+    );
 
     std::uint32_t u32RepeatCount() const noexcept;
+    std::uint32_t u32MessageByteCount() const noexcept;
 
 private:
     std::uint32_t m_u32RepeatCount;
+    std::uint32_t m_u32MessageByteCount;
 };
 
 /** @brief 文件Receiver只接收恢复长度，不接收原始文件Hash。 */

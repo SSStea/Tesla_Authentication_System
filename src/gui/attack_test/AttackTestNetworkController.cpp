@@ -10,6 +10,7 @@
 #include <QSet>
 #include <QTimer>
 #include <QUdpSocket>
+#include <QUuid>
 
 #include <algorithm>
 #include <variant>
@@ -112,6 +113,18 @@ QString AttackDatagramRecord::strMessageHex() const
     );
 }
 
+std::uint32_t AttackDatagramRecord::u32MessageByteCount() const noexcept
+{
+    return m_u32MessageByteCount;
+}
+
+void AttackDatagramRecord::setMessageByteCount(
+    std::uint32_t u32MessageByteCount
+) noexcept
+{
+    m_u32MessageByteCount = u32MessageByteCount;
+}
+
 AttackTestNetworkController::AttackTestNetworkController(
     std::uint16_t u16DiscoveryPort,
     QString strMulticastAddress,
@@ -146,6 +159,12 @@ AttackTestNetworkController::AttackTestNetworkController(
         &QUdpSocket::readyRead,
         this,
         &AttackTestNetworkController::processDiscoveryDatagrams
+    );
+    connect(
+        m_pPresenceSocket,
+        &QUdpSocket::readyRead,
+        this,
+        &AttackTestNetworkController::processDisplayContextDatagrams
     );
     connect(
         m_pMulticastSocket,
@@ -218,6 +237,7 @@ bool AttackTestNetworkController::bStart()
     }
 
     m_bRunning = true;
+    m_strDisplayRequestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     m_pHeartbeatTimer->start();
     sendHeartbeat();
     emit logMessage(QStringLiteral("攻击测试端已监听 %1:%2，本地地址 %3")
@@ -230,6 +250,11 @@ bool AttackTestNetworkController::bStart()
 
 void AttackTestNetworkController::stop() noexcept
 {
+    m_mapDisplayContexts.clear();
+    for (AttackDatagramRecord& recDatagram : m_vecRecords)
+    {
+        recDatagram.setMessageByteCount(MESSAGE_SIZE);
+    }
     m_adrManagerAddress.clear();
     m_u16ManagerPort = 0;
     stopHighRateTraffic();
@@ -277,7 +302,10 @@ bool AttackTestNetworkController::bBroadcastMessageConflict(
         return false;
     }
     if (strMessageHex.size() != MESSAGE_SIZE * 2
-        || arrMessage.size() != MESSAGE_SIZE)
+        || arrMessage.size() != MESSAGE_SIZE
+        || QString::fromLatin1(arrMessage.toHex()).compare(
+            strMessageHex, Qt::CaseInsensitive
+        ) != 0)
     {
         strError = QStringLiteral("Message必须是64个十六进制字符");
         return false;
@@ -421,6 +449,7 @@ void AttackTestNetworkController::processDiscoveryDatagrams()
             if (strRoundId != m_strCurrentRoundId)
             {
                 m_strCurrentRoundId = strRoundId;
+                m_mapDisplayContexts.clear();
                 m_vecRecords.clear();
                 m_setCurrentRoundChainIds.clear();
                 m_u64RoundFirstDatagramTimestampMilliseconds = 0;
@@ -449,6 +478,73 @@ void AttackTestNetworkController::processDiscoveryDatagrams()
             m_adrManagerAddress,
             u16SourcePort
         ));
+        sendHeartbeat();
+    }
+}
+
+void AttackTestNetworkController::processDisplayContextDatagrams()
+{
+    bool bChanged = false;
+    while (m_pPresenceSocket->hasPendingDatagrams())
+    {
+        QHostAddress adrSource;
+        quint16      u16SourcePort = 0;
+        QByteArray   arrDatagram;
+        arrDatagram.resize(m_pPresenceSocket->pendingDatagramSize());
+        const qint64 nReceived = m_pPresenceSocket->readDatagram(
+            arrDatagram.data(), arrDatagram.size(), &adrSource, &u16SourcePort
+        );
+        if (nReceived <= 0 || u16SourcePort != m_u16ManagerPort)
+        {
+            continue;
+        }
+
+        arrDatagram.resize(nReceived);
+        const NodeDiscoveryDecodeResult resMessage =
+            NodeDiscoveryJsonCodec::resDecode(arrDatagram.toStdString());
+        const auto* pMessage = std::get_if<NodeDiscoveryMessage>(&resMessage);
+        const auto* pContext = pMessage == nullptr ? nullptr
+            : std::get_if<MessageDisplayContextDetails>(&pMessage->varDetails());
+        // 多网卡Manager的扫描源IP和回复源IP可能不同，用本次会话ID关联心跳响应。
+        if (pContext == nullptr
+            || QString::fromStdString(pContext->strRequestId()) != m_strDisplayRequestId)
+        {
+            continue;
+        }
+
+        const auto pairContext = std::make_pair(
+            pContext->strSenderIp(), pContext->u64ChainId()
+        );
+        const auto itrContext = m_mapDisplayContexts.find(pairContext);
+        if (itrContext != m_mapDisplayContexts.end()
+            && itrContext->second.bFilePayload() == pContext->bFilePayload()
+            && itrContext->second.u64PayloadByteCount() == pContext->u64PayloadByteCount()
+            && itrContext->second.u32PacketCount() == pContext->u32PacketCount())
+        {
+            continue;
+        }
+        m_mapDisplayContexts.insert_or_assign(pairContext, *pContext);
+        if (m_mapDisplayContexts.size() > MAXIMUM_RECORD_COUNT)
+        {
+            m_mapDisplayContexts.erase(m_mapDisplayContexts.begin());
+        }
+
+        for (AttackDatagramRecord& recDatagram : m_vecRecords)
+        {
+            if (recDatagram.u64ChainId() == pContext->u64ChainId()
+                && recDatagram.strSenderAddress().toStdString() == pContext->strSenderIp())
+            {
+                recDatagram.setMessageByteCount(
+                    pContext->u32MessageByteCount(recDatagram.u32OriginalPacketIndex())
+                );
+                bChanged = true;
+            }
+        }
+    }
+
+    if (bChanged)
+    {
+        emit recordsChanged();
     }
 }
 
@@ -532,6 +628,15 @@ void AttackTestNetworkController::processMulticastDatagrams()
             hdrPacket.u32PacketIndex(),
             arrDatagram
         );
+        const auto itrContext = m_mapDisplayContexts.find(std::make_pair(
+            adrSource.toString().toStdString(), hdrPacket.u64ChainId()
+        ));
+        if (itrContext != m_mapDisplayContexts.end())
+        {
+            m_vecRecords.last().setMessageByteCount(
+                itrContext->second.u32MessageByteCount(hdrPacket.u32PacketIndex())
+            );
+        }
         if (m_vecRecords.size() > MAXIMUM_RECORD_COUNT)
         {
             m_vecRecords.removeFirst();
@@ -556,7 +661,7 @@ void AttackTestNetworkController::sendHeartbeat()
     {
         static_cast<void>(bSendPresence(
             NodeDiscoveryMessageType::Heartbeat,
-            QString(),
+            m_strDisplayRequestId,
             m_adrManagerAddress,
             m_u16ManagerPort
         ));

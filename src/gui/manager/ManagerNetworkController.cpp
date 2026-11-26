@@ -481,6 +481,13 @@ bool ManagerNetworkController::bSendObservationDisplayReset(
     ) == arrDatagram.size();
 }
 
+void ManagerNetworkController::setMessageDisplayContexts(
+    std::vector<MessageDisplayContextDetails> vecContexts
+)
+{
+    m_vecMessageDisplayContexts = std::move(vecContexts);
+}
+
 bool ManagerNetworkController::bQueueFileUpload(
     const QString& strEndpointKey,
     const std::string& strRequestId,
@@ -578,12 +585,14 @@ void ManagerNetworkController::processPendingDiscoveryDatagrams(QUdpSocket* pSoc
     while (pSocket->hasPendingDatagrams())
     {
         QHostAddress adrSource;
+        quint16      u16SourcePort = 0;
         QByteArray   arrDatagram;
         arrDatagram.resize(static_cast<qsizetype>(pSocket->pendingDatagramSize()));
         const qint64 nReceived = pSocket->readDatagram(
             arrDatagram.data(),
             arrDatagram.size(),
-            &adrSource
+            &adrSource,
+            &u16SourcePort
         );
         if (nReceived <= 0)
         {
@@ -600,15 +609,36 @@ void ManagerNetworkController::processPendingDiscoveryDatagrams(QUdpSocket* pSoc
 
         const NodeDiscoveryMessage& msgMessage =
             std::get<NodeDiscoveryMessage>(resMessage);
-        if (msgMessage.typeMessage() == NodeDiscoveryMessageType::DiscoverRequest)
+        const auto* pPresence = std::get_if<NodePresenceDetails>(
+            &msgMessage.varDetails()
+        );
+        if (pPresence == nullptr)
         {
             continue;
         }
 
         processPresence(
-            std::get<NodePresenceDetails>(msgMessage.varDetails()),
+            *pPresence,
             adrSource.toString()
         );
+        if (pPresence->roleNode() == NodeRole::AttackTester
+            && !pPresence->strRequestId().empty())
+        {
+            // 每次心跳补发，攻击端中途启动或丢失通知后仍能恢复展示信息。
+            for (const MessageDisplayContextDetails& detContext : m_vecMessageDisplayContexts)
+            {
+                const QByteArray arrContext = QByteArray::fromStdString(
+                    NodeDiscoveryJsonCodec::strEncode(NodeDiscoveryMessage(
+                        MessageDisplayContextDetails(
+                            detContext.strSenderIp(), detContext.u64ChainId(),
+                            detContext.bFilePayload(), detContext.u64PayloadByteCount(),
+                            detContext.u32PacketCount(), pPresence->strRequestId()
+                        )
+                    ))
+                );
+                pSocket->writeDatagram(arrContext, adrSource, u16SourcePort);
+            }
+        }
     }
 }
 

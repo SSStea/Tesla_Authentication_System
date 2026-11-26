@@ -275,10 +275,12 @@ ReceiverPayloadDetails varMapReceiverPayload(
             protocol::TextReceiverPayloadControlDetails
         >(varPayloadDetails))
     {
+        const auto& detText = std::get<protocol::TextReceiverPayloadControlDetails>(
+            varPayloadDetails
+        );
         return TextReceiverPayloadDetails(
-            std::get<protocol::TextReceiverPayloadControlDetails>(
-                varPayloadDetails
-            ).u32RepeatCount()
+            detText.u32RepeatCount(),
+            detText.u32MessageByteCount()
         );
     }
 

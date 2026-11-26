@@ -1,6 +1,7 @@
 #include "AuthenticationMonitorWidget.h"
 
 #include "AuthenticationDisplayText.h"
+#include "MessageDisplay.h"
 
 #include "protocol/AuthenticationControl.h"
 
@@ -595,13 +596,25 @@ QString strPacketDetails(const PacketObservationControlDetails& detPacket)
         const auto& detData = std::get<DataPacketObservationDetails>(
             detPacket.varPayloadDetails()
         );
+        const QByteArray arrMessage(
+            reinterpret_cast<const char*>(detData.arrMessage().data()),
+            static_cast<qsizetype>(detData.arrMessage().size())
+        );
+        const qsizetype nDisplayByteCount = nMessageDisplayByteCount(
+            arrMessage, detData.u32MessageByteCount()
+        );
         lstLines << QStringLiteral("类型: DATA")
                  << QStringLiteral("数据密钥编号: K%1").arg(
                         detPacket.u32IntervalIndex()
                     )
                  << QStringLiteral("Message: %1").arg(
-                        strBlock(detData.arrMessage())
+                        QString::fromLatin1(arrMessage.left(nDisplayByteCount).toHex())
                     );
+        if (nDisplayByteCount == arrMessage.size()
+            && detData.u32MessageByteCount() < arrMessage.size())
+        {
+            lstLines << QStringLiteral("填充区存在非零字节，已展开完整Message");
+        }
         if (detData.optDisclosedKey().has_value())
         {
             lstLines << QStringLiteral("披露密钥编号: K%1").arg(

@@ -76,12 +76,23 @@ ImprovedPacketObservationDetails::optFastGroupTag() const noexcept
 DataPacketObservationDetails::DataPacketObservationDetails(
     BinaryBlock arrMessage,
     std::optional<BinaryBlock> optDisclosedKey,
-    PacketModeObservationDetails varModeDetails
+    PacketModeObservationDetails varModeDetails,
+    std::uint32_t u32MessageByteCount
 )
     : m_arrMessage(std::move(arrMessage)),
+      m_u32MessageByteCount(u32MessageByteCount),
       m_optDisclosedKey(std::move(optDisclosedKey)),
       m_varModeDetails(std::move(varModeDetails))
 {
+    if (m_u32MessageByteCount == 0 || m_u32MessageByteCount > BINARY_BLOCK_SIZE)
+    {
+        throw std::invalid_argument("Observed Message byte count must be between 1 and 32");
+    }
+}
+
+std::uint32_t DataPacketObservationDetails::u32MessageByteCount() const noexcept
+{
+    return m_u32MessageByteCount;
 }
 
 const BinaryBlock& DataPacketObservationDetails::arrMessage() const noexcept

@@ -16,7 +16,8 @@ public:
         const protocol::ByteBuffer& vecRawDatagram
     );
     static protocol::PacketPayloadObservationDetails varPayloadDetails(
-        const protocol::UdpAuthenticationPacket& udpPacket
+        const protocol::UdpAuthenticationPacket& udpPacket,
+        std::uint32_t u32MessageByteCount = protocol::BINARY_BLOCK_SIZE
     );
     static protocol::AuthenticationCryptoAlgorithm algMap(
         crypto::CryptoAlgorithm algAlgorithm

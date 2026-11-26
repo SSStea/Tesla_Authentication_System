@@ -119,15 +119,18 @@ public:
     DataPacketObservationDetails(
         BinaryBlock arrMessage,
         std::optional<BinaryBlock> optDisclosedKey,
-        PacketModeObservationDetails varModeDetails
+        PacketModeObservationDetails varModeDetails,
+        std::uint32_t u32MessageByteCount = BINARY_BLOCK_SIZE
     );
 
     const BinaryBlock& arrMessage() const noexcept;
+    std::uint32_t u32MessageByteCount() const noexcept;
     const std::optional<BinaryBlock>& optDisclosedKey() const noexcept;
     const PacketModeObservationDetails& varModeDetails() const noexcept;
 
 private:
     BinaryBlock                      m_arrMessage;
+    std::uint32_t                    m_u32MessageByteCount;
     std::optional<BinaryBlock>       m_optDisclosedKey;
     PacketModeObservationDetails     m_varModeDetails;
 };

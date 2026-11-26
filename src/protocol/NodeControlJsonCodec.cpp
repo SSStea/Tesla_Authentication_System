@@ -675,6 +675,21 @@ ByteBuffer vecDecodeBytes(const std::string& strHex)
     return vecBytes;
 }
 
+std::uint32_t u32DecodeMessageByteCount(const nlohmann::json& jsnPayload)
+{
+    const auto itrCount = jsnPayload.find("messageByteCount");
+    if (itrCount == jsnPayload.end())
+    {
+        return BINARY_BLOCK_SIZE;
+    }
+    if (!itrCount->is_number_integer() || *itrCount < 1 || *itrCount > BINARY_BLOCK_SIZE)
+    {
+        throw std::invalid_argument("Message byte count must be an integer between 1 and 32");
+    }
+
+    return itrCount->get<std::uint32_t>();
+}
+
 nlohmann::json jsnEncodePacketPayload(
     const PacketPayloadObservationDetails& varPayload
 )
@@ -696,6 +711,7 @@ nlohmann::json jsnEncodePacketPayload(
     >(varPayload);
     nlohmann::json jsnPayload{
         {"type", "DATA"},
+        {"messageByteCount", detData.u32MessageByteCount()},
         {"message", AuthenticationControlValueCodec::strEncodeBlock(
             detData.arrMessage()
         )}
@@ -818,7 +834,8 @@ PacketPayloadObservationDetails varDecodePacketPayload(
             jsnPayload.at("message").get<std::string>()
         ),
         std::move(optDisclosedKey),
-        std::move(varMode)
+        std::move(varMode),
+        u32DecodeMessageByteCount(jsnPayload)
     );
 }
 
@@ -969,6 +986,11 @@ nlohmann::json jsnEncodeReceiverPayload(
         return {
             {"type", "TEXT"},
             {
+                "messageByteCount",
+                std::get<TextReceiverPayloadControlDetails>(varPayloadDetails)
+                    .u32MessageByteCount()
+            },
+            {
                 "repeatCount",
                 std::get<TextReceiverPayloadControlDetails>(varPayloadDetails)
                     .u32RepeatCount()
@@ -994,7 +1016,8 @@ ReceiverPayloadControlDetails varDecodeReceiverPayload(
     if (strType == "TEXT")
     {
         return TextReceiverPayloadControlDetails(
-            jsnPayload.at("repeatCount").get<std::uint32_t>()
+            jsnPayload.at("repeatCount").get<std::uint32_t>(),
+            u32DecodeMessageByteCount(jsnPayload)
         );
     }
 

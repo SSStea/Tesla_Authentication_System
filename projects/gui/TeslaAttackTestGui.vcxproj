@@ -22,6 +22,7 @@
   <ItemDefinitionGroup><ClCompile><AdditionalIncludeDirectories>$(TeslaSourceRoot)gui\attack_test;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile></ItemDefinitionGroup>
   <ItemGroup>
     <QtMoc Include="$(TeslaSourceRoot)gui\attack_test\*.h" />
+    <ClInclude Include="$(TeslaSourceRoot)gui\shared\MessageDisplay.h" />
     <QtRcc Include="$(TeslaSourceRoot)gui\resources\ApplicationIcons.qrc" />
     <ClCompile Include="$(TeslaSourceRoot)gui\attack_test\*.cpp" />
     <ResourceCompile Include="$(TeslaSourceRoot)gui\resources\ApplicationPcRed.rc" />

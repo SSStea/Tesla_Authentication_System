@@ -33,6 +33,8 @@ const char* pTypeName(NodeDiscoveryMessageType typeMessage)
         return "HEARTBEAT";
     case NodeDiscoveryMessageType::ObservationDisplayReset:
         return "OBSERVATION_DISPLAY_RESET";
+    case NodeDiscoveryMessageType::MessageDisplayContext:
+        return "MESSAGE_DISPLAY_CONTEXT";
     }
 
     throw std::invalid_argument("Unknown discovery message type");
@@ -185,6 +187,79 @@ std::uint64_t NodePresenceDetails::u64TimestampMilliseconds() const noexcept
     return m_u64TimestampMilliseconds;
 }
 
+MessageDisplayContextDetails::MessageDisplayContextDetails(
+    std::string strSenderIp,
+    std::uint64_t u64ChainId,
+    bool bFilePayload,
+    std::uint64_t u64PayloadByteCount,
+    std::uint32_t u32PacketCount,
+    std::string strRequestId
+)
+    : m_strSenderIp(std::move(strSenderIp)),
+      m_u64ChainId(u64ChainId),
+      m_bFilePayload(bFilePayload),
+      m_u64PayloadByteCount(u64PayloadByteCount),
+      m_u32PacketCount(u32PacketCount),
+      m_strRequestId(std::move(strRequestId))
+{
+    if (!m_strRequestId.empty())
+    {
+        validateIdentifier(m_strRequestId, "Display request ID");
+    }
+    validateIdentifier(m_strSenderIp, "Display Sender IP");
+    if (m_u64ChainId == 0 || m_u32PacketCount == 0 || m_u64PayloadByteCount == 0
+        || (!m_bFilePayload && m_u64PayloadByteCount > BINARY_BLOCK_SIZE)
+        || (m_bFilePayload && (m_u64PayloadByteCount - 1U) / BINARY_BLOCK_SIZE
+            + 1U != m_u32PacketCount))
+    {
+        throw std::invalid_argument("Invalid Message display context");
+    }
+}
+
+const std::string& MessageDisplayContextDetails::strSenderIp() const noexcept
+{
+    return m_strSenderIp;
+}
+
+std::uint64_t MessageDisplayContextDetails::u64ChainId() const noexcept
+{
+    return m_u64ChainId;
+}
+
+bool MessageDisplayContextDetails::bFilePayload() const noexcept
+{
+    return m_bFilePayload;
+}
+
+std::uint64_t MessageDisplayContextDetails::u64PayloadByteCount() const noexcept
+{
+    return m_u64PayloadByteCount;
+}
+
+std::uint32_t MessageDisplayContextDetails::u32PacketCount() const noexcept
+{
+    return m_u32PacketCount;
+}
+
+const std::string& MessageDisplayContextDetails::strRequestId() const noexcept
+{
+    return m_strRequestId;
+}
+
+std::uint32_t MessageDisplayContextDetails::u32MessageByteCount(
+    std::uint32_t u32PacketIndex
+) const noexcept
+{
+    if (u32PacketIndex == 0 || u32PacketIndex > m_u32PacketCount)
+    {
+        return BINARY_BLOCK_SIZE;
+    }
+
+    return m_bFilePayload
+        ? u32FileMessageByteCount(m_u64PayloadByteCount, u32PacketIndex)
+        : static_cast<std::uint32_t>(m_u64PayloadByteCount);
+}
+
 NodeDiscoveryMessage::NodeDiscoveryMessage(NodeDiscoveryMessageDetails varDetails)
     : m_varDetails(std::move(varDetails))
 {
@@ -200,6 +275,11 @@ NodeDiscoveryMessageType NodeDiscoveryMessage::typeMessage() const noexcept
     if (std::holds_alternative<ObservationDisplayResetDetails>(m_varDetails))
     {
         return NodeDiscoveryMessageType::ObservationDisplayReset;
+    }
+
+    if (std::holds_alternative<MessageDisplayContextDetails>(m_varDetails))
+    {
+        return NodeDiscoveryMessageType::MessageDisplayContext;
     }
 
     return std::get<NodePresenceDetails>(m_varDetails).typeMessage();
@@ -229,6 +309,19 @@ std::string NodeDiscoveryJsonCodec::strEncode(const NodeDiscoveryMessage& msgMes
         jsnMessage["roundId"] = std::get<ObservationDisplayResetDetails>(
             msgMessage.varDetails()
         ).strRoundId();
+        return jsnMessage.dump();
+    }
+
+    if (const auto* pContext = std::get_if<MessageDisplayContextDetails>(
+            &msgMessage.varDetails()
+        ))
+    {
+        jsnMessage["senderIp"] = pContext->strSenderIp();
+        jsnMessage["chainId"] = pContext->u64ChainId();
+        jsnMessage["filePayload"] = pContext->bFilePayload();
+        jsnMessage["payloadByteCount"] = pContext->u64PayloadByteCount();
+        jsnMessage["packetCount"] = pContext->u32PacketCount();
+        jsnMessage["requestId"] = pContext->strRequestId();
         return jsnMessage.dump();
     }
 
@@ -268,6 +361,18 @@ NodeDiscoveryDecodeResult NodeDiscoveryJsonCodec::resDecode(const std::string& s
         {
             return NodeDiscoveryMessage(ObservationDisplayResetDetails(
                 jsnMessage.at("roundId").get<std::string>()
+            ));
+        }
+
+        if (strType == "MESSAGE_DISPLAY_CONTEXT")
+        {
+            return NodeDiscoveryMessage(MessageDisplayContextDetails(
+                jsnMessage.at("senderIp").get<std::string>(),
+                jsnMessage.at("chainId").get<std::uint64_t>(),
+                jsnMessage.at("filePayload").get<bool>(),
+                jsnMessage.at("payloadByteCount").get<std::uint64_t>(),
+                jsnMessage.at("packetCount").get<std::uint32_t>(),
+                jsnMessage.value("requestId", std::string())
             ));
         }
 
